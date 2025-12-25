@@ -187,11 +187,14 @@ const VoiceControl = ({
 
   // Current audio element for playback
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioChunksRef = useRef<Uint8Array[]>([]);
+  const playbackStartedRef = useRef<boolean>(false);
 
-  // Play next audio chunk in queue
-  const playNextAudio = useCallback(() => {
-    if (audioQueueRef.current.length === 0) {
+  // Play combined audio from all buffered chunks
+  const playCombinedAudio = useCallback(() => {
+    if (audioChunksRef.current.length === 0) {
       isPlayingRef.current = false;
+      playbackStartedRef.current = false;
       setIsSpeaking(false);
       return;
     }
@@ -199,19 +202,30 @@ const VoiceControl = ({
     isPlayingRef.current = true;
     setIsSpeaking(true);
 
-    const audioBlob = audioQueueRef.current.shift()!;
-    const audioUrl = URL.createObjectURL(audioBlob);
+    // Combine all chunks into one
+    const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+    const combined = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of audioChunksRef.current) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    audioChunksRef.current = [];
+
+    const blob = new Blob([combined], { type: 'audio/mpeg' });
+    const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
     currentAudioRef.current = audio;
 
     audio.onended = () => {
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
-      // Immediately play next chunk if available
-      if (audioQueueRef.current.length > 0) {
-        playNextAudio();
+      // Check if more audio arrived while playing
+      if (audioChunksRef.current.length > 0) {
+        playCombinedAudio();
       } else {
         isPlayingRef.current = false;
+        playbackStartedRef.current = false;
         setIsSpeaking(false);
       }
     };
@@ -219,27 +233,22 @@ const VoiceControl = ({
     audio.onerror = () => {
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
-      // Try next chunk on error
-      if (audioQueueRef.current.length > 0) {
-        playNextAudio();
-      } else {
-        isPlayingRef.current = false;
-        setIsSpeaking(false);
-      }
+      isPlayingRef.current = false;
+      playbackStartedRef.current = false;
+      setIsSpeaking(false);
     };
 
     audio.play().catch(() => {
-      // Try next chunk on play error
-      if (audioQueueRef.current.length > 0) {
-        playNextAudio();
-      } else {
-        isPlayingRef.current = false;
-        setIsSpeaking(false);
-      }
+      isPlayingRef.current = false;
+      playbackStartedRef.current = false;
+      setIsSpeaking(false);
     });
   }, []);
 
-  // Play audio chunks from Hume as they arrive (production mode)
+  // Buffer audio chunks from Hume (production mode)
+  // Wait for 3 chunks before starting playback to reduce choppiness
+  const MIN_CHUNKS_BEFORE_PLAY = 3;
+
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
@@ -252,26 +261,33 @@ const VoiceControl = ({
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Create blob and add to queue
-        const blob = new Blob([bytes], { type: 'audio/mpeg' });
-        audioQueueRef.current.push(blob);
+        // Add to buffer
+        audioChunksRef.current.push(bytes);
+        setIsSpeaking(true);
 
-        // Start playing immediately if not already
-        if (!isPlayingRef.current) {
-          playNextAudio();
+        // Start playing after buffering enough chunks
+        if (
+          !playbackStartedRef.current &&
+          audioChunksRef.current.length >= MIN_CHUNKS_BEFORE_PLAY
+        ) {
+          playbackStartedRef.current = true;
+          playCombinedAudio();
         }
       } catch (err) {
         console.error('Error processing audio:', err);
       }
     },
-    [isProduction, playNextAudio]
+    [isProduction, playCombinedAudio]
   );
 
-  // Called when assistant finishes speaking
+  // Called when assistant finishes speaking - play any remaining buffered audio
   const onAssistantEnd = useCallback(() => {
     setIsListening(true);
-    // Don't stop speaking - let the queue drain naturally
-  }, []);
+    // Play any remaining audio that didn't reach the buffer threshold
+    if (audioChunksRef.current.length > 0 && !isPlayingRef.current) {
+      playCombinedAudio();
+    }
+  }, [playCombinedAudio]);
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {

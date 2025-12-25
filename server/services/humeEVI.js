@@ -169,17 +169,13 @@ export function setupHumeWebSocket(wss) {
               );
 
               if (result.success && humeWs && humeWs.readyState === WebSocket.OPEN) {
-                const contextMsg = `The user just enabled their camera. ${result.description}`;
-                console.log(
-                  '📷 Sending vision context to Hume:',
-                  contextMsg.substring(0, 100) + '...'
-                );
+                console.log('📷 Vision context:', result.description.substring(0, 100) + '...');
 
-                // Send as user_input so Hume responds naturally to the context
+                // Send as assistant_input with instruction not to repeat
                 humeWs.send(
                   JSON.stringify({
-                    type: 'user_input',
-                    text: contextMsg,
+                    type: 'assistant_input',
+                    text: `(I can now see the user through their camera: ${result.description}. I will acknowledge this briefly without repeating the description verbatim.)`,
                   })
                 );
               }
