@@ -185,6 +185,46 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
+  // Audio queue for smooth playback
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const nextPlayTimeRef = useRef<number>(0);
+  const isPlayingRef = useRef<boolean>(false);
+
+  // Process audio queue
+  const processAudioQueue = useCallback(() => {
+    if (!audioContextRef.current || audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      setIsSpeaking(false);
+      return;
+    }
+
+    isPlayingRef.current = true;
+    setIsSpeaking(true);
+
+    const floatData = audioQueueRef.current.shift()!;
+    const audioBuffer = audioContextRef.current.createBuffer(1, floatData.length, 24000);
+    audioBuffer.getChannelData(0).set(floatData);
+
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContextRef.current.destination);
+
+    // Schedule playback to avoid gaps
+    const currentTime = audioContextRef.current.currentTime;
+    const startTime = Math.max(currentTime, nextPlayTimeRef.current);
+    source.start(startTime);
+    nextPlayTimeRef.current = startTime + audioBuffer.duration;
+
+    source.onended = () => {
+      if (audioQueueRef.current.length > 0) {
+        processAudioQueue();
+      } else {
+        isPlayingRef.current = false;
+        setIsSpeaking(false);
+      }
+    };
+  }, []);
+
   // Play audio from Hume (production mode)
   // Hume sends audio at 24kHz sample rate as raw PCM Int16 little-endian
   const playAudioChunk = useCallback(
@@ -199,9 +239,10 @@ const VoiceControl = ({
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Create audio context with device's native sample rate (avoids resampling issues)
+        // Create audio context if needed
         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
           audioContextRef.current = new AudioContext();
+          nextPlayTimeRef.current = 0;
         }
 
         // Hume sends raw PCM Int16 at 24kHz, convert to Float32
@@ -211,23 +252,18 @@ const VoiceControl = ({
           floatData[i] = int16Data[i] / 32768;
         }
 
-        // Create audio buffer at Hume's sample rate (24kHz)
-        // The AudioContext will resample to device rate automatically
-        const audioBuffer = audioContextRef.current.createBuffer(1, floatData.length, 24000);
-        audioBuffer.getChannelData(0).set(floatData);
+        // Add to queue
+        audioQueueRef.current.push(floatData);
 
-        const source = audioContextRef.current.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContextRef.current.destination);
-        source.start();
-
-        setIsSpeaking(true);
-        source.onended = () => setIsSpeaking(false);
+        // Start processing if not already
+        if (!isPlayingRef.current) {
+          processAudioQueue();
+        }
       } catch (err) {
         console.error('Error playing audio:', err);
       }
     },
-    [isProduction]
+    [isProduction, processAudioQueue]
   );
 
   // Capture and send webcam frame

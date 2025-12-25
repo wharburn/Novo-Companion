@@ -32,6 +32,8 @@ openai_client = openai.OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else Non
 current_emotions = []
 evi_socket_ref = None
 camera_just_enabled = False  # Track if camera was just enabled
+assistant_speaking = False  # Track if assistant is currently speaking
+pending_camera_context = None  # Queue camera context to send after assistant finishes
 
 
 def describe_image_sync(image_data: str) -> str:
