@@ -188,19 +188,19 @@ const VoiceControl = ({
   // Current audio element for playback
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioChunksRef = useRef<Uint8Array[]>([]);
-  const playbackStartedRef = useRef<boolean>(false);
 
-  // Play combined audio from all buffered chunks
-  const playCombinedAudio = useCallback(() => {
+  // Play all buffered audio as one combined file
+  const playAllBufferedAudio = useCallback(() => {
     if (audioChunksRef.current.length === 0) {
       isPlayingRef.current = false;
-      playbackStartedRef.current = false;
       setIsSpeaking(false);
+      setIsListening(true);
       return;
     }
 
     isPlayingRef.current = true;
     setIsSpeaking(true);
+    setIsListening(false);
 
     // Combine all chunks into one
     const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
@@ -212,43 +212,41 @@ const VoiceControl = ({
     }
     audioChunksRef.current = [];
 
+    console.log(`🔊 Playing combined audio: ${totalLength} bytes`);
+
     const blob = new Blob([combined], { type: 'audio/mpeg' });
     const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
     currentAudioRef.current = audio;
 
     audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
-      currentAudioRef.current = null;
-      // Check if more audio arrived while playing
-      if (audioChunksRef.current.length > 0) {
-        playCombinedAudio();
-      } else {
-        isPlayingRef.current = false;
-        playbackStartedRef.current = false;
-        setIsSpeaking(false);
-      }
-    };
-
-    audio.onerror = () => {
+      console.log('🔊 Audio playback ended');
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
       isPlayingRef.current = false;
-      playbackStartedRef.current = false;
       setIsSpeaking(false);
+      setIsListening(true);
     };
 
-    audio.play().catch(() => {
+    audio.onerror = (e) => {
+      console.error('🔊 Audio playback error:', e);
+      URL.revokeObjectURL(audioUrl);
+      currentAudioRef.current = null;
       isPlayingRef.current = false;
-      playbackStartedRef.current = false;
       setIsSpeaking(false);
+      setIsListening(true);
+    };
+
+    audio.play().catch((err) => {
+      console.error('🔊 Failed to play audio:', err);
+      isPlayingRef.current = false;
+      setIsSpeaking(false);
+      setIsListening(true);
     });
   }, []);
 
   // Buffer audio chunks from Hume (production mode)
-  // Wait for 3 chunks before starting playback to reduce choppiness
-  const MIN_CHUNKS_BEFORE_PLAY = 3;
-
+  // Don't play immediately - wait for assistant_end
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
@@ -261,33 +259,24 @@ const VoiceControl = ({
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Add to buffer
+        // Add to buffer - don't play yet, wait for assistant_end
         audioChunksRef.current.push(bytes);
-        setIsSpeaking(true);
-
-        // Start playing after buffering enough chunks
-        if (
-          !playbackStartedRef.current &&
-          audioChunksRef.current.length >= MIN_CHUNKS_BEFORE_PLAY
-        ) {
-          playbackStartedRef.current = true;
-          playCombinedAudio();
-        }
       } catch (err) {
         console.error('Error processing audio:', err);
       }
     },
-    [isProduction, playCombinedAudio]
+    [isProduction]
   );
 
-  // Called when assistant finishes speaking - play any remaining buffered audio
+  // Called when assistant finishes - now play all buffered audio
   const onAssistantEnd = useCallback(() => {
-    setIsListening(true);
-    // Play any remaining audio that didn't reach the buffer threshold
-    if (audioChunksRef.current.length > 0 && !isPlayingRef.current) {
-      playCombinedAudio();
+    console.log(`🔊 assistant_end received, ${audioChunksRef.current.length} chunks buffered`);
+    if (audioChunksRef.current.length > 0) {
+      playAllBufferedAudio();
+    } else {
+      setIsListening(true);
     }
-  }, [playCombinedAudio]);
+  }, [playAllBufferedAudio]);
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {
