@@ -29,6 +29,7 @@ export function setupHumeWebSocket(wss) {
     const userId = req.url.split('userId=')[1]?.split('&')[0] || 'default';
     let humeWs = null;
     let audioChunkCount = 0;
+    let audioOutputCount = 0;
 
     // Connect to Hume EVI using raw WebSocket
     const humeUrl = `wss://api.hume.ai/v0/evi/chat?api_key=${HUME_API_KEY}&config_id=${HUME_CONFIG_ID}`;
@@ -88,16 +89,14 @@ export function setupHumeWebSocket(wss) {
             timestamp: new Date().toISOString(),
           }).catch((err) => console.error('Error saving assistant message:', err));
         } else if (data.type === 'audio_output') {
-          // Log first audio chunk to debug format
-          if (!this.audioChunkLogged) {
-            this.audioChunkLogged = true;
-            console.log('📥 Hume -> Client: audio_output (first chunk)');
-            console.log('   Data length:', data.data?.length, 'chars base64');
-            // Decode to check actual byte size
-            const decoded = Buffer.from(data.data, 'base64');
-            console.log('   Decoded size:', decoded.length, 'bytes');
-            console.log('   Sample count:', decoded.length / 2, '(if 16-bit)');
-            console.log('   Duration:', (decoded.length / 2 / 24000).toFixed(3), 's (at 24kHz)');
+          // Log all audio chunks for debugging
+          audioOutputCount++;
+          if (audioOutputCount === 1 || audioOutputCount % 10 === 0) {
+            console.log(
+              `🔊 Hume -> Client: audio_output #${audioOutputCount}, ${
+                data.data?.length || 0
+              } chars`
+            );
           }
         } else if (data.type === 'chat_metadata') {
           console.log('📥 Hume -> Client: chat_metadata');
