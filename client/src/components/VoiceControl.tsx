@@ -186,6 +186,9 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
+  // Hume EVI output sample rate - try 48kHz (if still slow, might be 44100 or 24000)
+  const HUME_OUTPUT_SAMPLE_RATE = 48000;
+
   // Process audio queue for smooth playback
   const processAudioQueue = useCallback(() => {
     if (!audioContextRef.current || audioQueueRef.current.length === 0) {
@@ -198,7 +201,11 @@ const VoiceControl = ({
     setIsSpeaking(true);
 
     const floatData = audioQueueRef.current.shift()!;
-    const audioBuffer = audioContextRef.current.createBuffer(1, floatData.length, 24000);
+    const audioBuffer = audioContextRef.current.createBuffer(
+      1,
+      floatData.length,
+      HUME_OUTPUT_SAMPLE_RATE
+    );
     audioBuffer.getChannelData(0).set(floatData);
 
     const source = audioContextRef.current.createBufferSource();
@@ -222,7 +229,7 @@ const VoiceControl = ({
   }, []);
 
   // Play audio from Hume (production mode)
-  // Hume sends audio at 24kHz sample rate as raw PCM Int16 little-endian
+  // Hume sends raw PCM Int16 little-endian audio
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
@@ -239,9 +246,13 @@ const VoiceControl = ({
         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
           audioContextRef.current = new AudioContext();
           nextPlayTimeRef.current = 0;
+          console.log(
+            '🔊 AudioContext created, device sample rate:',
+            audioContextRef.current.sampleRate
+          );
         }
 
-        // Hume sends raw PCM Int16 at 24kHz, convert to Float32
+        // Hume sends raw PCM Int16, convert to Float32
         const int16Data = new Int16Array(bytes.buffer);
         const floatData = new Float32Array(int16Data.length);
         for (let i = 0; i < int16Data.length; i++) {

@@ -75,7 +75,17 @@ export function setupHumeWebSocket(wss) {
             timestamp: new Date().toISOString(),
           }).catch((err) => console.error('Error saving assistant message:', err));
         } else if (data.type === 'audio_output') {
-          // Don't log audio chunks - too noisy
+          // Log first audio chunk to debug format
+          if (!this.audioChunkLogged) {
+            this.audioChunkLogged = true;
+            console.log('📥 Hume -> Client: audio_output (first chunk)');
+            console.log('   Data length:', data.data?.length, 'chars base64');
+            // Decode to check actual byte size
+            const decoded = Buffer.from(data.data, 'base64');
+            console.log('   Decoded size:', decoded.length, 'bytes');
+            console.log('   Sample count:', decoded.length / 2, '(if 16-bit)');
+            console.log('   Duration:', (decoded.length / 2 / 24000).toFixed(3), 's (at 24kHz)');
+          }
         } else if (data.type === 'chat_metadata') {
           console.log('📥 Hume -> Client: chat_metadata');
           console.log('   Chat ID:', data.chat_id);
