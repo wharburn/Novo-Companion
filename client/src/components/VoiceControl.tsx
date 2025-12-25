@@ -86,14 +86,29 @@ const VoiceControl = ({
   // Check if we're in production (not using Python server)
   const isProduction = !WS_URL.includes('localhost:8765');
 
+  // Resample audio from source rate to target rate
+  const resampleAudio = useCallback(
+    (inputData: Float32Array, sourceRate: number, targetRate: number): Float32Array => {
+      if (sourceRate === targetRate) return inputData;
+      const ratio = sourceRate / targetRate;
+      const outputLength = Math.floor(inputData.length / ratio);
+      const output = new Float32Array(outputLength);
+      for (let i = 0; i < outputLength; i++) {
+        output[i] = inputData[Math.floor(i * ratio)];
+      }
+      return output;
+    },
+    []
+  );
+
   // Start microphone capture for production mode
+  // Hume EVI expects: linear16 PCM, 16kHz, mono
   const startMicrophoneCapture = useCallback(async () => {
     if (!isProduction) return; // Python server handles audio in dev
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -101,7 +116,11 @@ const VoiceControl = ({
       });
       micStreamRef.current = stream;
 
-      audioContextRef.current = new AudioContext({ sampleRate: 16000 });
+      // Use device's native sample rate (browser may not support 16kHz)
+      audioContextRef.current = new AudioContext();
+      const actualSampleRate = audioContextRef.current.sampleRate;
+      console.log(`🎤 Audio context sample rate: ${actualSampleRate}Hz`);
+
       const source = audioContextRef.current.createMediaStreamSource(stream);
       const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
@@ -109,8 +128,14 @@ const VoiceControl = ({
       processor.onaudioprocess = (e) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-        const inputData = e.inputBuffer.getChannelData(0);
-        // Convert Float32 to Int16
+        let inputData = e.inputBuffer.getChannelData(0);
+
+        // Resample to 16kHz if needed (Hume expects 16kHz)
+        if (actualSampleRate !== 16000) {
+          inputData = resampleAudio(inputData, actualSampleRate, 16000);
+        }
+
+        // Convert Float32 to Int16 (little-endian)
         const int16Data = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
           const s = Math.max(-1, Math.min(1, inputData[i]));
@@ -118,7 +143,12 @@ const VoiceControl = ({
         }
 
         // Convert to base64
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Data.buffer)));
+        const bytes = new Uint8Array(int16Data.buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
 
         wsRef.current.send(
           JSON.stringify({
@@ -135,7 +165,7 @@ const VoiceControl = ({
     } catch (err) {
       console.error('Failed to start microphone:', err);
     }
-  }, [isProduction]);
+  }, [isProduction, resampleAudio]);
 
   // Stop microphone capture
   const stopMicrophoneCapture = useCallback(() => {
@@ -155,6 +185,7 @@ const VoiceControl = ({
   }, []);
 
   // Play audio from Hume (production mode)
+  // Hume sends audio at 24kHz sample rate as raw PCM Int16 little-endian
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
@@ -167,19 +198,20 @@ const VoiceControl = ({
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Create audio context if needed
+        // Create audio context with device's native sample rate (avoids resampling issues)
         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-          audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+          audioContextRef.current = new AudioContext();
         }
 
-        // Hume sends raw PCM Int16, convert to Float32
+        // Hume sends raw PCM Int16 at 24kHz, convert to Float32
         const int16Data = new Int16Array(bytes.buffer);
         const floatData = new Float32Array(int16Data.length);
         for (let i = 0; i < int16Data.length; i++) {
           floatData[i] = int16Data[i] / 32768;
         }
 
-        // Create audio buffer and play
+        // Create audio buffer at Hume's sample rate (24kHz)
+        // The AudioContext will resample to device rate automatically
         const audioBuffer = audioContextRef.current.createBuffer(1, floatData.length, 24000);
         audioBuffer.getChannelData(0).set(floatData);
 
