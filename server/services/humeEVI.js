@@ -175,10 +175,11 @@ export function setupHumeWebSocket(wss) {
                   contextMsg.substring(0, 100) + '...'
                 );
 
+                // Send as user_input so Hume responds naturally to the context
                 humeWs.send(
                   JSON.stringify({
-                    type: 'assistant_input',
-                    text: `[VISUAL CONTEXT: ${contextMsg}]`,
+                    type: 'user_input',
+                    text: contextMsg,
                   })
                 );
               }
