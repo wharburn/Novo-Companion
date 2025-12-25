@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { convertBase64ToBlob, MimeType } from 'hume';
 import './VoiceControl.css';
 
 interface VoiceControlProps {
@@ -57,8 +56,7 @@ const VoiceControl = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<Float32Array[]>([]);
-  const nextPlayTimeRef = useRef<number>(0);
+  const audioQueueRef = useRef<Blob[]>([]);
   const isPlayingRef = useRef<boolean>(false);
 
   // Cleanup on unmount
@@ -187,12 +185,9 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
-  // Hume EVI output sample rate - try 48kHz (if still slow, might be 44100 or 24000)
-  const HUME_OUTPUT_SAMPLE_RATE = 48000;
-
-  // Process audio queue for smooth playback
-  const processAudioQueue = useCallback(() => {
-    if (!audioContextRef.current || audioQueueRef.current.length === 0) {
+  // Audio queue and playback using HTMLAudioElement (Hume recommended approach)
+  const playNextAudio = useCallback(() => {
+    if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
       setIsSpeaking(false);
       return;
@@ -201,77 +196,56 @@ const VoiceControl = ({
     isPlayingRef.current = true;
     setIsSpeaking(true);
 
-    const floatData = audioQueueRef.current.shift()!;
-    const audioBuffer = audioContextRef.current.createBuffer(
-      1,
-      floatData.length,
-      HUME_OUTPUT_SAMPLE_RATE
-    );
-    audioBuffer.getChannelData(0).set(floatData);
+    const audioBlob = audioQueueRef.current.shift()!;
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
 
-    const source = audioContextRef.current.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContextRef.current.destination);
-
-    // Schedule playback to avoid gaps
-    const currentTime = audioContextRef.current.currentTime;
-    const startTime = Math.max(currentTime, nextPlayTimeRef.current);
-    source.start(startTime);
-    nextPlayTimeRef.current = startTime + audioBuffer.duration;
-
-    source.onended = () => {
-      if (audioQueueRef.current.length > 0) {
-        processAudioQueue();
-      } else {
-        isPlayingRef.current = false;
-        setIsSpeaking(false);
-      }
+    audio.onended = () => {
+      URL.revokeObjectURL(audioUrl);
+      playNextAudio();
     };
+
+    audio.onerror = (err) => {
+      console.error('Audio playback error:', err);
+      URL.revokeObjectURL(audioUrl);
+      playNextAudio();
+    };
+
+    audio.play().catch((err) => {
+      console.error('Failed to play audio:', err);
+      playNextAudio();
+    });
   }, []);
 
   // Play audio from Hume (production mode)
-  // Hume sends raw PCM Int16 little-endian audio
+  // Hume sends MP3 audio as base64
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
 
       try {
-        // Decode base64 to ArrayBuffer
+        // Decode base64 to binary
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Create audio context if needed
-        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-          audioContextRef.current = new AudioContext();
-          nextPlayTimeRef.current = 0;
-          console.log(
-            '🔊 AudioContext created, device sample rate:',
-            audioContextRef.current.sampleRate
-          );
-        }
-
-        // Hume sends raw PCM Int16, convert to Float32
-        const int16Data = new Int16Array(bytes.buffer);
-        const floatData = new Float32Array(int16Data.length);
-        for (let i = 0; i < int16Data.length; i++) {
-          floatData[i] = int16Data[i] / 32768;
-        }
+        // Create blob - Hume sends audio/mpeg (MP3)
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
 
         // Add to queue
-        audioQueueRef.current.push(floatData);
+        audioQueueRef.current.push(blob);
 
-        // Start processing if not already
+        // Start playing if not already
         if (!isPlayingRef.current) {
-          processAudioQueue();
+          playNextAudio();
         }
       } catch (err) {
-        console.error('Error playing audio:', err);
+        console.error('Error processing audio:', err);
       }
     },
-    [isProduction, processAudioQueue]
+    [isProduction, playNextAudio]
   );
 
   // Capture and send webcam frame
