@@ -128,12 +128,13 @@ const VoiceControl = ({
       processor.onaudioprocess = (e) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-        let inputData = e.inputBuffer.getChannelData(0);
+        const rawData = e.inputBuffer.getChannelData(0);
 
         // Resample to 16kHz if needed (Hume expects 16kHz)
-        if (actualSampleRate !== 16000) {
-          inputData = resampleAudio(inputData, actualSampleRate, 16000);
-        }
+        const inputData: Float32Array =
+          actualSampleRate !== 16000
+            ? resampleAudio(rawData, actualSampleRate, 16000)
+            : new Float32Array(rawData);
 
         // Convert Float32 to Int16 (little-endian)
         const int16Data = new Int16Array(inputData.length);

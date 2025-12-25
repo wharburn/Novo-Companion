@@ -81,17 +81,17 @@ async def send_context_to_evi(context_msg: str, display_msg: str = None):
         return
     from hume.empathic_voice.types import UserInput
 
-    # First, inject the visual context as system context via session settings
-    # Then send a simple display message that the user sees in transcript
-    # We combine them: the context in brackets tells EVI what to respond to,
-    # but the visible message is simpler
-    combined_msg = f"{context_msg}"
-    if display_msg:
-        # Put the context in system brackets and the display message visible
-        combined_msg = f"[SYSTEM CONTEXT: {context_msg}] {display_msg}"
+    try:
+        # Combine context and display message
+        combined_msg = context_msg
+        if display_msg:
+            combined_msg = f"[SYSTEM CONTEXT: {context_msg}] {display_msg}"
 
-    user_input = UserInput(text=combined_msg)
-    await evi_socket_ref.send_user_input(user_input)
+        # Use send_publish with UserInput (replaces deprecated send_user_input)
+        user_input = UserInput(text=combined_msg)
+        await evi_socket_ref.send_publish(user_input)
+    except Exception as e:
+        print(f"❌ Error sending to EVI: {type(e).__name__}: {e}")
 
 
 async def analyze_face_frame(client, image_data: str, websocket):
