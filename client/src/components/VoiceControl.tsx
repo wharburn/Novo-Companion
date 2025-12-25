@@ -185,82 +185,77 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
-  // Current audio element for playback
+  // Audio queue for sequential playback
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const audioChunksRef = useRef<Uint8Array[]>([]);
+  const audioBlobQueueRef = useRef<Blob[]>([]);
+  const isQueuePlayingRef = useRef<boolean>(false);
 
-  // Play all buffered audio as one combined file
-  const playAllBufferedAudio = useCallback(() => {
-    if (audioChunksRef.current.length === 0) {
+  // Play next blob in queue
+  const playNextInQueue = useCallback(() => {
+    if (audioBlobQueueRef.current.length === 0) {
+      console.log('🔊 Queue empty, playback complete');
+      isQueuePlayingRef.current = false;
       isPlayingRef.current = false;
       setIsSpeaking(false);
       setIsListening(true);
       return;
     }
 
-    isPlayingRef.current = true;
-    setIsSpeaking(true);
-    setIsListening(false);
-
-    // Combine all chunks into one
-    const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
-    const combined = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of audioChunksRef.current) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
-    audioChunksRef.current = [];
-
-    console.log(`🔊 Playing combined audio: ${totalLength} bytes`);
-
-    const blob = new Blob([combined], { type: 'audio/mpeg' });
+    const blob = audioBlobQueueRef.current.shift()!;
     const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
     currentAudioRef.current = audio;
 
     audio.onended = () => {
-      console.log('🔊 Audio playback ended');
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
-      setIsListening(true);
+      // Play next immediately
+      playNextInQueue();
     };
 
-    audio.onerror = (e) => {
-      console.error('🔊 Audio playback error:', e);
+    audio.onerror = () => {
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
-      setIsListening(true);
+      // Skip to next on error
+      playNextInQueue();
     };
 
-    audio.play().catch((err) => {
-      console.error('🔊 Failed to play audio:', err);
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
-      setIsListening(true);
+    audio.play().catch(() => {
+      // Skip to next on play error
+      playNextInQueue();
     });
   }, []);
 
+  // Start playing the queue
+  const startQueuePlayback = useCallback(() => {
+    if (audioBlobQueueRef.current.length === 0) {
+      setIsListening(true);
+      return;
+    }
+
+    console.log(`🔊 Starting playback of ${audioBlobQueueRef.current.length} audio chunks`);
+    isQueuePlayingRef.current = true;
+    isPlayingRef.current = true;
+    setIsSpeaking(true);
+    setIsListening(false);
+    playNextInQueue();
+  }, [playNextInQueue]);
+
   // Buffer audio chunks from Hume (production mode)
-  // Don't play immediately - wait for assistant_end
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
 
       try {
-        // Decode base64 to binary
+        // Decode base64 to binary and create blob
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Add to buffer - don't play yet, wait for assistant_end
-        audioChunksRef.current.push(bytes);
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+        audioBlobQueueRef.current.push(blob);
       } catch (err) {
         console.error('Error processing audio:', err);
       }
@@ -268,15 +263,15 @@ const VoiceControl = ({
     [isProduction]
   );
 
-  // Called when assistant finishes - now play all buffered audio
+  // Called when assistant finishes - start sequential playback
   const onAssistantEnd = useCallback(() => {
-    console.log(`🔊 assistant_end received, ${audioChunksRef.current.length} chunks buffered`);
-    if (audioChunksRef.current.length > 0) {
-      playAllBufferedAudio();
-    } else {
+    console.log(`🔊 assistant_end, ${audioBlobQueueRef.current.length} chunks queued`);
+    if (!isQueuePlayingRef.current && audioBlobQueueRef.current.length > 0) {
+      startQueuePlayback();
+    } else if (audioBlobQueueRef.current.length === 0) {
       setIsListening(true);
     }
-  }, [playAllBufferedAudio]);
+  }, [startQueuePlayback]);
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {
