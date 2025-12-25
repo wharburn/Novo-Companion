@@ -41,7 +41,7 @@ const VoiceControl = ({
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [showPictureModal, setShowPictureModal] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
-  const [_status, setStatus] = useState('Run: python hume_server.py');
+  const [_status, setStatus] = useState('Tap avatar to connect');
   const [topEmotions, setTopEmotions] = useState<Array<{ name: string; score: number }>>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -51,6 +51,13 @@ const VoiceControl = ({
   const streamRef = useRef<MediaStream | null>(null);
   const pictureStreamRef = useRef<MediaStream | null>(null);
   const frameIntervalRef = useRef<number | null>(null);
+
+  // Audio refs for production mode
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioQueueRef = useRef<string[]>([]);
+  const isPlayingAudioRef = useRef(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -75,6 +82,120 @@ const VoiceControl = ({
       onDisconnectRef.current = disconnect;
     }
   });
+
+  // Check if we're in production (not using Python server)
+  const isProduction = !WS_URL.includes('localhost:8765');
+
+  // Start microphone capture for production mode
+  const startMicrophoneCapture = useCallback(async () => {
+    if (!isProduction) return; // Python server handles audio in dev
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      micStreamRef.current = stream;
+
+      audioContextRef.current = new AudioContext({ sampleRate: 16000 });
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+        const inputData = e.inputBuffer.getChannelData(0);
+        // Convert Float32 to Int16
+        const int16Data = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+
+        // Convert to base64
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Data.buffer)));
+
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'audio_input',
+            data: base64,
+          })
+        );
+      };
+
+      source.connect(processor);
+      processor.connect(audioContextRef.current.destination);
+      setIsListening(true);
+      console.log('🎤 Microphone capture started');
+    } catch (err) {
+      console.error('Failed to start microphone:', err);
+    }
+  }, [isProduction]);
+
+  // Stop microphone capture
+  const stopMicrophoneCapture = useCallback(() => {
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+    setIsListening(false);
+  }, []);
+
+  // Play audio from Hume (production mode)
+  const playAudioChunk = useCallback(
+    async (base64Audio: string) => {
+      if (!isProduction) return; // Python server handles audio in dev
+
+      try {
+        // Decode base64 to ArrayBuffer
+        const binaryString = atob(base64Audio);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Create audio context if needed
+        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+          audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+        }
+
+        // Hume sends raw PCM Int16, convert to Float32
+        const int16Data = new Int16Array(bytes.buffer);
+        const floatData = new Float32Array(int16Data.length);
+        for (let i = 0; i < int16Data.length; i++) {
+          floatData[i] = int16Data[i] / 32768;
+        }
+
+        // Create audio buffer and play
+        const audioBuffer = audioContextRef.current.createBuffer(1, floatData.length, 24000);
+        audioBuffer.getChannelData(0).set(floatData);
+
+        const source = audioContextRef.current.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContextRef.current.destination);
+        source.start();
+
+        setIsSpeaking(true);
+        source.onended = () => setIsSpeaking(false);
+      } catch (err) {
+        console.error('Error playing audio:', err);
+      }
+    },
+    [isProduction]
+  );
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {
@@ -234,12 +355,13 @@ const VoiceControl = ({
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          // Don't log emotions_detected to reduce noise
-          if (data.type !== 'emotions_detected') {
-            console.log('📥 Python server:', data.type);
+          // Don't log noisy messages
+          if (!['emotions_detected', 'audio_output'].includes(data.type)) {
+            console.log('📥 Server:', data.type);
           }
 
           switch (data.type) {
+            // Python server events (dev mode)
             case 'connected':
               setIsConnected(true);
               setIsListening(true);
@@ -255,14 +377,34 @@ const VoiceControl = ({
               setIsListening(true);
               setStatus('Listening...');
               break;
+            // Node.js server events (production mode)
+            case 'connection_status':
+              if (data.status === 'connected') {
+                setIsConnected(true);
+                setStatus('Connected - Speak now!');
+                startMicrophoneCapture();
+              } else {
+                setIsConnected(false);
+                setStatus('Disconnected');
+                stopMicrophoneCapture();
+              }
+              break;
+            case 'audio_output':
+              // Play audio from Hume (production mode)
+              if (data.data) {
+                playAudioChunk(data.data);
+              }
+              break;
             case 'user_message': {
               // Strip out [SYSTEM CONTEXT: ...] prefix if present
-              let content = data.content || '';
+              let content = data.message?.content || data.content || '';
               const contextMatch = content.match(/^\[SYSTEM CONTEXT:.*?\]\s*/);
               if (contextMatch) {
                 content = content.substring(contextMatch[0].length);
               }
-              setTranscript((prev) => [...prev, `You: ${content}`]);
+              if (content) {
+                setTranscript((prev) => [...prev, `You: ${content}`]);
+              }
               break;
             }
             case 'assistant_message':
@@ -281,6 +423,10 @@ const VoiceControl = ({
                 }
               }
               break;
+            case 'assistant_end':
+              setIsSpeaking(false);
+              setIsListening(true);
+              break;
             case 'error':
               console.error('Error:', data.message);
               break;
@@ -291,9 +437,10 @@ const VoiceControl = ({
       };
 
       ws.onerror = () => {
-        setStatus('Connection error - is Python server running?');
+        setStatus('Connection error');
         setIsConnected(false);
         stopWebcam();
+        stopMicrophoneCapture();
       };
 
       ws.onclose = () => {
@@ -302,6 +449,7 @@ const VoiceControl = ({
         setIsListening(false);
         setIsSpeaking(false);
         stopWebcam();
+        stopMicrophoneCapture();
       };
     } catch (error) {
       console.error('Error connecting:', error);
@@ -311,6 +459,7 @@ const VoiceControl = ({
 
   const disconnect = () => {
     stopWebcam();
+    stopMicrophoneCapture();
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
