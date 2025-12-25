@@ -102,9 +102,12 @@ export function setupHumeWebSocket(wss) {
             );
           }
         } else if (data.type === 'assistant_end') {
-          // Assistant finished speaking - resume mic input
-          assistantIsSpeaking = false;
-          console.log('📥 Hume -> Client: assistant_end');
+          // Assistant finished speaking - resume mic input after a short delay
+          // to prevent leftover audio from causing interruption
+          console.log('📥 Hume -> Client: assistant_end (resuming mic in 500ms)');
+          setTimeout(() => {
+            assistantIsSpeaking = false;
+          }, 500);
         } else if (data.type === 'chat_metadata') {
           console.log('📥 Hume -> Client: chat_metadata');
           console.log('   Chat ID:', data.chat_id);
@@ -145,7 +148,7 @@ export function setupHumeWebSocket(wss) {
     });
 
     // Message types that should NOT be forwarded to Hume
-    const localOnlyTypes = ['camera_enabled', 'camera_disabled', 'face_frame'];
+    const localOnlyTypes = ['camera_enabled', 'camera_disabled', 'face_frame', 'picture'];
     let cameraEnabled = false;
     let firstFrameProcessed = false;
 
@@ -171,19 +174,19 @@ export function setupHumeWebSocket(wss) {
             try {
               const result = await analyzeImage(
                 data.data,
-                'In under 100 characters, describe the person you see.'
+                'Describe the setting and environment in this webcam image in under 50 words. Focus on the room, lighting, and any notable objects.'
               );
 
               if (result.success && humeWs && humeWs.readyState === WebSocket.OPEN) {
                 // Truncate to ensure under 256 chars total
-                const desc = result.description.substring(0, 150);
+                const desc = result.description.substring(0, 120);
                 console.log('📷 Vision context:', desc);
 
                 // Send short context as assistant_input
                 humeWs.send(
                   JSON.stringify({
                     type: 'assistant_input',
-                    text: `(I see: ${desc}. Briefly acknowledge.)`,
+                    text: `(Camera on. Setting: ${desc})`,
                   })
                 );
               }
