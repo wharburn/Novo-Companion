@@ -40,6 +40,19 @@ export function setupHumeWebSocket(wss) {
       console.log('✅ Connected to Hume EVI');
       activeConnections.set(userId, { clientWs, humeWs });
 
+      // Send session settings to tell Hume about our audio format
+      // Browser sends 16kHz resampled PCM Linear 16
+      const sessionSettings = {
+        type: 'session_settings',
+        audio: {
+          format: 'linear16',
+          sample_rate: 16000,
+          channels: 1,
+        },
+      };
+      humeWs.send(JSON.stringify(sessionSettings));
+      console.log('📤 Sent session settings:', sessionSettings);
+
       clientWs.send(
         JSON.stringify({
           type: 'connection_status',
