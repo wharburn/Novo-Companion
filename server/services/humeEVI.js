@@ -45,7 +45,7 @@ export function setupHumeWebSocket(wss) {
       const sessionSettings = {
         type: 'session_settings',
         audio: {
-          format: 'linear16',
+          encoding: 'linear16',
           sample_rate: 16000,
           channels: 1,
         },
