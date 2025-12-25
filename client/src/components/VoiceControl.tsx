@@ -56,8 +56,9 @@ const VoiceControl = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<string[]>([]);
-  const isPlayingAudioRef = useRef(false);
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const nextPlayTimeRef = useRef<number>(0);
+  const isPlayingRef = useRef<boolean>(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -185,12 +186,7 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
-  // Audio queue for smooth playback
-  const audioQueueRef = useRef<Float32Array[]>([]);
-  const nextPlayTimeRef = useRef<number>(0);
-  const isPlayingRef = useRef<boolean>(false);
-
-  // Process audio queue
+  // Process audio queue for smooth playback
   const processAudioQueue = useCallback(() => {
     if (!audioContextRef.current || audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
