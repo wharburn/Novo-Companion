@@ -187,11 +187,10 @@ const VoiceControl = ({
 
   // Current audio element for playback
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const audioBufferRef = useRef<Uint8Array[]>([]);
 
-  // Play buffered audio as one continuous stream
-  const playBufferedAudio = useCallback(() => {
-    if (audioBufferRef.current.length === 0) {
+  // Play next audio chunk in queue
+  const playNextAudio = useCallback(() => {
+    if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
       setIsSpeaking(false);
       return;
@@ -200,49 +199,47 @@ const VoiceControl = ({
     isPlayingRef.current = true;
     setIsSpeaking(true);
 
-    // Combine all chunks into one blob
-    const totalLength = audioBufferRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
-    const combined = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of audioBufferRef.current) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
-    audioBufferRef.current = [];
-
-    const blob = new Blob([combined], { type: 'audio/mpeg' });
-    const audioUrl = URL.createObjectURL(blob);
+    const audioBlob = audioQueueRef.current.shift()!;
+    const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
     currentAudioRef.current = audio;
 
     audio.onended = () => {
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
-      // Check if more audio arrived while playing
-      if (audioBufferRef.current.length > 0) {
-        playBufferedAudio();
+      // Immediately play next chunk if available
+      if (audioQueueRef.current.length > 0) {
+        playNextAudio();
       } else {
         isPlayingRef.current = false;
         setIsSpeaking(false);
       }
     };
 
-    audio.onerror = (err) => {
-      console.error('Audio playback error:', err);
+    audio.onerror = () => {
       URL.revokeObjectURL(audioUrl);
       currentAudioRef.current = null;
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
+      // Try next chunk on error
+      if (audioQueueRef.current.length > 0) {
+        playNextAudio();
+      } else {
+        isPlayingRef.current = false;
+        setIsSpeaking(false);
+      }
     };
 
-    audio.play().catch((err) => {
-      console.error('Failed to play audio:', err);
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
+    audio.play().catch(() => {
+      // Try next chunk on play error
+      if (audioQueueRef.current.length > 0) {
+        playNextAudio();
+      } else {
+        isPlayingRef.current = false;
+        setIsSpeaking(false);
+      }
     });
   }, []);
 
-  // Buffer audio chunks from Hume (production mode)
+  // Play audio chunks from Hume as they arrive (production mode)
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
@@ -255,25 +252,26 @@ const VoiceControl = ({
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Add to buffer
-        audioBufferRef.current.push(bytes);
-        setIsSpeaking(true);
+        // Create blob and add to queue
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+        audioQueueRef.current.push(blob);
+
+        // Start playing immediately if not already
+        if (!isPlayingRef.current) {
+          playNextAudio();
+        }
       } catch (err) {
         console.error('Error processing audio:', err);
       }
     },
-    [isProduction]
+    [isProduction, playNextAudio]
   );
 
-  // Called when assistant finishes speaking - play all buffered audio
+  // Called when assistant finishes speaking
   const onAssistantEnd = useCallback(() => {
-    if (audioBufferRef.current.length > 0 && !isPlayingRef.current) {
-      playBufferedAudio();
-    } else if (!isPlayingRef.current) {
-      setIsSpeaking(false);
-    }
     setIsListening(true);
-  }, [playBufferedAudio]);
+    // Don't stop speaking - let the queue drain naturally
+  }, []);
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {
