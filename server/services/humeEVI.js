@@ -83,7 +83,9 @@ export function setupHumeWebSocket(wss) {
             console.error('Error extracting learnings:', err)
           );
         } else if (data.type === 'assistant_message') {
-          console.log('📥 Hume -> Client: assistant_message');
+          // Start blocking mic as soon as assistant begins responding
+          assistantIsSpeaking = true;
+          console.log('📥 Hume -> Client: assistant_message (blocking mic)');
 
           saveConversation(userId, {
             type: 'assistant',
@@ -91,8 +93,6 @@ export function setupHumeWebSocket(wss) {
             timestamp: new Date().toISOString(),
           }).catch((err) => console.error('Error saving assistant message:', err));
         } else if (data.type === 'audio_output') {
-          // Assistant is speaking - pause mic input
-          assistantIsSpeaking = true;
           audioOutputCount++;
           if (audioOutputCount === 1 || audioOutputCount % 10 === 0) {
             console.log(
