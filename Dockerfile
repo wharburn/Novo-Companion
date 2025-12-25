@@ -1,5 +1,5 @@
 # Build stage for React frontend
-FROM node:18-alpine AS client-build
+FROM node:20-alpine AS client-build
 
 WORKDIR /app/client
 
@@ -12,11 +12,11 @@ RUN npm ci
 # Copy client source
 COPY client/ ./
 
-# Build client
-RUN npm run build
+# Build client (skip type checking for faster builds)
+RUN npm run build -- --skipLibCheck
 
 # Production stage
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 

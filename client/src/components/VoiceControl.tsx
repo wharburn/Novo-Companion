@@ -15,7 +15,9 @@ interface VoiceControlProps {
 
 // WebSocket URL - Python server for local dev, Node.js server for production
 const getWebSocketUrl = () => {
-  if (import.meta.env.DEV) {
+  // Check if we're in development mode
+  const isDev = import.meta.env?.DEV ?? window.location.hostname === 'localhost';
+  if (isDev) {
     // Local development: use Python server
     return 'ws://localhost:8765';
   }
@@ -27,7 +29,7 @@ const WS_URL = getWebSocketUrl();
 const FRAME_INTERVAL_MS = 1000; // Send a frame every 1 second
 
 const VoiceControl = ({
-  userId,
+  userId: _userId,
   onStateChange,
   onEmotionsDetected,
   onConnectRef,
@@ -39,7 +41,7 @@ const VoiceControl = ({
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [showPictureModal, setShowPictureModal] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
-  const [status, setStatus] = useState('Run: python hume_server.py');
+  const [_status, setStatus] = useState('Run: python hume_server.py');
   const [topEmotions, setTopEmotions] = useState<Array<{ name: string; score: number }>>([]);
 
   const wsRef = useRef<WebSocket | null>(null);

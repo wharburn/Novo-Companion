@@ -10,7 +10,7 @@ const LONG_PRESS_DURATION = 5000; // 5 seconds to open settings
 
 function App() {
   const [activeView, setActiveView] = useState<'main' | 'family' | 'settings'>('main');
-  const [showCamera, setShowCamera] = useState(false);
+  const [_showCamera, _setShowCamera] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [voiceState, setVoiceState] = useState({
     isConnected: false,
@@ -18,10 +18,14 @@ function App() {
     isSpeaking: false,
   });
   const [longPressProgress, setLongPressProgress] = useState(0);
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
-  const progressInterval = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectRef = useRef<(() => void) | null>(null);
   const disconnectRef = useRef<(() => void) | null>(null);
+
+  // Suppress unused variable warnings
+  void _showCamera;
+  void _setShowCamera;
 
   useEffect(() => {
     loadUserProfile();
