@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoVo Idle Loop Generator</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #1a1a1a;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      border: 2px solid #667eea;
+      border-radius: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .controls {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      background: #667eea;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #764ba2;
+    }
+    .info {
+      margin-top: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>NoVo Idle Loop Generator</h1>
+  <canvas id="canvas" width="800" height="800"></canvas>
+  <div class="controls">
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+    <button id="downloadBtn" disabled>Download Video</button>
+  </div>
+  <div class="info">
+    <p>This will generate a 5-second idle loop animation for NoVo.</p>
+    <p>Click "Start Recording" to begin, then "Stop Recording" when done.</p>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    let mediaRecorder;
+    let recordedChunks = [];
+    let animationId;
+    let time = 0;
+
+    function drawNoVo(t) {
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Breathing effect
+      const breathe = Math.sin(t * 0.002) * 0.05 + 1;
+      
+      // Center position
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.scale(breathe, breathe);
+
+      // Draw face circle
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 250, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw eyes
+      const blinkPhase = Math.sin(t * 0.003);
+      const eyeHeight = blinkPhase > 0.95 ? 5 : 40;
+      
+      // Left eye
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.ellipse(-60, -40, 40, eyeHeight, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Left pupil
+      if (eyeHeight > 10) {
+        ctx.fillStyle = '#333';
+        ctx.beginPath();
+        ctx.arc(-60, -40, 20, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Right eye
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.ellipse(60, -40, 40, eyeHeight, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Right pupil
+      if (eyeHeight > 10) {
+        ctx.fillStyle = '#333';
+        ctx.beginPath();
+        ctx.arc(60, -40, 20, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw mouth (gentle smile)
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 20, 80, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+
+      // Draw NoVo text
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 80px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('NoVo', 0, 150);
+
+      ctx.restore();
+    }
+
+    function animate() {
+      drawNoVo(time);
+      time += 16; // ~60fps
+      animationId = requestAnimationFrame(animate);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      const stream = canvas.captureStream(30); // 30 FPS
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 2500000
+      });
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        downloadBtn.onclick = () => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'novo-idle-loop.webm';
+          a.click();
+        };
+        downloadBtn.disabled = false;
+      };
+
+      recordedChunks = [];
+      time = 0;
+      mediaRecorder.start();
+      animate();
+      
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    });
+
+    stopBtn.addEventListener('click', () => {
+      mediaRecorder.stop();
+      cancelAnimationFrame(animationId);
+      
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    });
+
+    // Start animation preview
+    animate();
+  </script>
+</body>
+</html>
+

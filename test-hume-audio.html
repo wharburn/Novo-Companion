@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hume Audio Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+        margin-bottom: 20px;
+      }
+      button {
+        padding: 15px 30px;
+        font-size: 16px;
+        margin: 10px 5px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+      .start-btn {
+        background: #4caf50;
+        color: white;
+      }
+      .start-btn:hover {
+        background: #45a049;
+      }
+      .stop-btn {
+        background: #f44336;
+        color: white;
+      }
+      .stop-btn:hover {
+        background: #da190b;
+      }
+      .status {
+        padding: 15px;
+        margin: 20px 0;
+        border-radius: 5px;
+        font-weight: bold;
+      }
+      .status.connected {
+        background: #d4edda;
+        color: #155724;
+      }
+      .status.disconnected {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      .log {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 12px;
+        margin-top: 20px;
+      }
+      .log-entry {
+        margin: 5px 0;
+        padding: 5px;
+        border-left: 3px solid #007bff;
+        padding-left: 10px;
+      }
+      .log-entry.sent {
+        border-left-color: #28a745;
+        background: #d4edda;
+      }
+      .log-entry.received {
+        border-left-color: #007bff;
+        background: #d1ecf1;
+      }
+      .log-entry.error {
+        border-left-color: #dc3545;
+        background: #f8d7da;
+      }
+      .transcript {
+        background: #fff3cd;
+        padding: 15px;
+        border-radius: 5px;
+        margin-top: 20px;
+        min-height: 100px;
+      }
+      .transcript h3 {
+        margin-top: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🎤 Hume EVI Audio Test</h1>
+
+      <div id="status" class="status disconnected">Status: Disconnected</div>
+
+      <button id="startBtn" class="start-btn">🎙️ Start Test</button>
+      <button id="stopBtn" class="stop-btn" style="display: none">⏹️ Stop Test</button>
+
+      <div class="transcript">
+        <h3>Transcript:</h3>
+        <div id="transcript"></div>
+      </div>
+
+      <div class="log">
+        <h3>Debug Log:</h3>
+        <div id="log"></div>
+      </div>
+    </div>
+
+    <script>
+      let ws = null;
+      let mediaStream = null;
+      let audioContext = null;
+      let mediaRecorder = null;
+      let audioChunkCount = 0;
+
+      const statusEl = document.getElementById('status');
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const logEl = document.getElementById('log');
+      const transcriptEl = document.getElementById('transcript');
+
+      function log(message, type = 'info') {
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${type}`;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logEl.appendChild(entry);
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log(message);
+      }
+
+      function updateStatus(text, connected) {
+        statusEl.textContent = `Status: ${text}`;
+        statusEl.className = `status ${connected ? 'connected' : 'disconnected'}`;
+      }
+
+      async function startTest() {
+        try {
+          log('🎤 Requesting microphone access...');
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              sampleRate: 16000,
+              echoCancellation: true,
+              noiseSuppression: true,
+            },
+          });
+          log('✅ Microphone access granted', 'sent');
+
+          // Connect to WebSocket
+          log('🔌 Connecting to server...');
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${protocol}//${window.location.hostname}:3000/ws/hume?userId=test-user`;
+
+          ws = new WebSocket(wsUrl);
+
+          ws.onopen = () => {
+            log('✅ Connected to Hume EVI', 'sent');
+            updateStatus('Connected - Listening...', true);
+
+            // Send session settings
+            const settings = {
+              type: 'session_settings',
+              audio: {
+                encoding: 'linear16',
+                sample_rate: 16000,
+                channels: 1,
+              },
+            };
+            ws.send(JSON.stringify(settings));
+            log(`📤 Sent: ${JSON.stringify(settings)}`, 'sent');
+
+            // Start audio streaming
+            startAudioStreaming();
+          };
+
+          ws.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              log(`📥 Received: ${data.type}`, 'received');
+
+              if (data.type === 'user_message') {
+                transcriptEl.innerHTML += `<p><strong>You:</strong> ${
+                  data.message?.content || ''
+                }</p>`;
+                log(`🗣️ USER SAID: "${data.message?.content}"`, 'received');
+              } else if (data.type === 'assistant_message') {
+                transcriptEl.innerHTML += `<p><strong>NoVo:</strong> ${
+                  data.message?.content || ''
+                }</p>`;
+                log(`🤖 NOVO SAID: "${data.message?.content}"`, 'received');
+              } else if (data.type === 'error') {
+                log(`❌ ERROR: ${data.message} (${data.code})`, 'error');
+              }
+            } catch (e) {
+              log(`📥 Received binary data (${event.data.length} bytes)`, 'received');
+            }
+          };
+
+          ws.onerror = (error) => {
+            log(`❌ WebSocket error: ${error}`, 'error');
+          };
+
+          ws.onclose = () => {
+            log('🔌 Disconnected from Hume', 'error');
+            updateStatus('Disconnected', false);
+          };
+
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'inline-block';
+        } catch (error) {
+          log(`❌ Error: ${error.message}`, 'error');
+          alert('Failed to start test: ' + error.message);
+        }
+      }
+
+      function startAudioStreaming() {
+        log('🎤 Starting audio streaming...');
+
+        // Use MediaRecorder API (recommended by Hume)
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+        log(`🎵 Using MIME type: ${mimeType}`);
+
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+
+        mediaRecorder.ondataavailable = async (event) => {
+          if (event.data.size < 1) return;
+          if (ws.readyState !== WebSocket.OPEN) return;
+
+          // Convert blob to base64
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1];
+            const audioInput = {
+              type: 'audio_input',
+              data: base64,
+            };
+            ws.send(JSON.stringify(audioInput));
+            audioChunkCount++;
+            if (audioChunkCount % 5 === 0) {
+              log(`📤 Sent ${audioChunkCount} audio chunks (${event.data.size} bytes)`, 'sent');
+            }
+          };
+          reader.readAsDataURL(event.data);
+        };
+
+        // Capture audio at 100ms intervals (recommended by Hume)
+        mediaRecorder.start(100);
+        log('✅ Audio streaming started', 'sent');
+      }
+
+      function stopTest() {
+        log('⏹️ Stopping test...');
+
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+        }
+
+        if (ws) {
+          ws.close();
+        }
+
+        audioContext = null;
+        mediaStream = null;
+        ws = null;
+        audioChunkCount = 0;
+
+        startBtn.style.display = 'inline-block';
+        stopBtn.style.display = 'none';
+        updateStatus('Disconnected', false);
+        log('✅ Test stopped');
+      }
+
+      startBtn.addEventListener('click', startTest);
+      stopBtn.addEventListener('click', stopTest);
+
+      log('✅ Test page loaded. Click "Start Test" to begin.');
+    </script>
+  </body>
+</html>

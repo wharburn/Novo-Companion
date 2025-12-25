@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hume Audio Debug Test</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .disconnect {
+      background: #f44336;
+    }
+    .disconnect:hover {
+      background: #da190b;
+    }
+    #status {
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    #status.disconnected {
+      background: #ffebee;
+      color: #c62828;
+    }
+    #status.connected {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    #log {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+      border-radius: 4px;
+      height: 400px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .log-entry {
+      margin-bottom: 8px;
+      padding: 4px 0;
+      border-bottom: 1px solid #333;
+    }
+    .log-time {
+      color: #858585;
+      margin-right: 10px;
+    }
+    .log-send {
+      color: #4ec9b0;
+    }
+    .log-receive {
+      color: #ce9178;
+    }
+    .log-error {
+      color: #f48771;
+    }
+    .log-info {
+      color: #9cdcfe;
+    }
+    .log-success {
+      color: #4ec9b0;
+    }
+    .controls {
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎤 Hume Audio Debug Test</h1>
+    <p class="subtitle">This test will help diagnose audio input issues with Hume EVI</p>
+    
+    <div class="controls">
+      <button id="connectBtn" onclick="connect()">Connect to Hume</button>
+      <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+    </div>
+
+    <div id="status" class="disconnected">Status: Disconnected</div>
+
+    <h3>Debug Log:</h3>
+    <div id="log"></div>
+  </div>
+
+  <script>
+    let ws = null;
+    let mediaRecorder = null;
+    let mediaStream = null;
+    let audioChunkCount = 0;
+    let receivedMessages = {};
+
+    function log(message, type = 'info') {
+      const logDiv = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span class="log-time">[${time}]</span><span class="log-${type}">${message}</span>`;
+      logDiv.appendChild(entry);
+      logDiv.scrollTop = logDiv.scrollHeight;
+      console.log(`[${time}] ${message}`);
+    }
+
+    function updateStatus(text, connected) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.textContent = `Status: ${text}`;
+      statusDiv.className = connected ? 'connected' : 'disconnected';
+    }
+
+    async function connect() {
+      try {
+        log('🎬 Starting connection process...', 'info');
+        
+        // Get microphone access
+        log('🎤 Requesting microphone access...', 'info');
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        log('✅ Microphone access granted', 'success');
+
+        // Connect to server WebSocket
+        log('🔌 Connecting to ws://localhost:3000/api/hume/ws...', 'info');
+        ws = new WebSocket('ws://localhost:3000/api/hume/ws?userId=test-user');
+
+        ws.onopen = () => {
+          log('✅ WebSocket connected to server', 'success');
+          updateStatus('Connected', true);
+          document.getElementById('connectBtn').disabled = true;
+          document.getElementById('disconnectBtn').disabled = false;
+          startAudioStreaming();
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          
+          // Track message types
+          receivedMessages[data.type] = (receivedMessages[data.type] || 0) + 1;
+          
+          if (data.type === 'user_message') {
+            log(`📝 USER SAID: "${data.message.content}"`, 'success');
+          } else if (data.type === 'assistant_message') {
+            log(`🤖 ASSISTANT: "${data.message.content}"`, 'receive');
+          } else if (data.type === 'error') {
+            log(`❌ ERROR: ${data.code} - ${data.message}`, 'error');
+          } else {
+            log(`📥 Received: ${data.type}`, 'receive');
+          }
+        };
+
+        ws.onerror = (error) => {
+          log(`❌ WebSocket error: ${error}`, 'error');
+        };
+
+        ws.onclose = () => {
+          log('🔌 WebSocket closed', 'info');
+          updateStatus('Disconnected', false);
+          document.getElementById('connectBtn').disabled = false;
+          document.getElementById('disconnectBtn').disabled = true;
+          
+          // Log summary
+          log(`📊 Message Summary: ${JSON.stringify(receivedMessages, null, 2)}`, 'info');
+        };
+
+      } catch (error) {
+        log(`❌ Connection failed: ${error.message}`, 'error');
+      }
+    }
+
+    function startAudioStreaming() {
+      try {
+        // Determine MIME type
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm') 
+          ? 'audio/webm' 
+          : 'audio/ogg';
+        
+        log(`🎵 Using MIME type: ${mimeType}`, 'info');
+
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+        audioChunkCount = 0;
+
+        mediaRecorder.ondataavailable = async (event) => {
+          if (event.data.size < 1) {
+            log('⚠️ Empty audio blob received', 'error');
+            return;
+          }
+
+          if (ws.readyState !== WebSocket.OPEN) {
+            log('⚠️ WebSocket not open, skipping audio chunk', 'error');
+            return;
+          }
+
+          // Convert blob to base64
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1];
+            
+            // Log first chunk details
+            if (audioChunkCount === 0) {
+              log(`🎤 First audio chunk:`, 'info');
+              log(`   - Size: ${event.data.size} bytes`, 'info');
+              log(`   - Type: ${event.data.type}`, 'info');
+              log(`   - Base64 length: ${base64.length}`, 'info');
+              log(`   - Base64 preview: ${base64.substring(0, 50)}...`, 'info');
+            }
+
+            const audioInput = {
+              type: 'audio_input',
+              data: base64,
+            };
+            
+            ws.send(JSON.stringify(audioInput));
+            audioChunkCount++;
+            
+            if (audioChunkCount % 10 === 0) {
+              log(`📤 Sent ${audioChunkCount} audio chunks`, 'send');
+            }
+          };
+          reader.readAsDataURL(event.data);
+        };
+
+        // Start recording at 100ms intervals
+        mediaRecorder.start(100);
+        log('🎤 Audio streaming started (100ms intervals)', 'success');
+
+      } catch (error) {
+        log(`❌ Failed to start audio streaming: ${error.message}`, 'error');
+      }
+    }
+
+    function disconnect() {
+      log('🛑 Disconnecting...', 'info');
+      
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        log('🎤 MediaRecorder stopped', 'info');
+      }
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        log('🎤 Microphone released', 'info');
+      }
+
+      if (ws) {
+        ws.close();
+      }
+
+      mediaRecorder = null;
+      mediaStream = null;
+      ws = null;
+      audioChunkCount = 0;
+    }
+  </script>
+</body>
+</html>
+

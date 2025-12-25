@@ -1,0 +1,95 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background: white;
+  padding: 0.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.app-header.settings-open {
+  background: #f0f0f0;
+}
+
+.header-logo {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-logo img {
+  height: 60px;
+  width: auto;
+  pointer-events: none;
+}
+
+.long-press-indicator {
+  position: absolute;
+  bottom: -8px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.long-press-progress {
+  height: 100%;
+  background: #3498db;
+  transition: width 0.05s linear;
+}
+
+.app-main {
+  flex: 1;
+  padding: 0 2rem 2rem 2rem;
+  margin: -5px auto 0 auto;
+  max-width: 1400px;
+  width: 100%;
+}
+
+.main-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.show-novo-btn {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  font-size: 20px;
+  font-weight: bold;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  line-height: 1.4;
+}
+
+.show-novo-btn .camera-icon {
+  font-size: 1.5em;
+}
+
+.show-novo-btn:hover {
+  background: #2980b9;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+.show-novo-btn:active {
+  transform: translateY(0);
+}

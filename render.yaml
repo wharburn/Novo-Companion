@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: novo-app
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: HUME_API_KEY
+        sync: false
+      - key: HUME_SECRET_KEY
+        sync: false
+      - key: NEXT_PUBLIC_HUME_CONFIG_ID
+        sync: false
+      - key: DID_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_TOKEN
+        sync: false
+      - key: UPSTASH_VECTOR_URL
+        sync: false
+      - key: UPSTASH_VECTOR_TOKEN
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: auto
+      - key: S3_BUCKET_NAME
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: CORS_ORIGIN
+        generateValue: true
+    healthCheckPath: /api/health
+

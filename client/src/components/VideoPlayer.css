@@ -1,0 +1,256 @@
+.video-player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.video-player:hover {
+  transform: scale(1.02);
+}
+
+.video-player:active {
+  transform: scale(0.98);
+}
+
+.video-prompt {
+  font-size: 16px;
+  font-weight: 700;
+  color: #2c3e50;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 0.5rem 0;
+}
+
+.video-container {
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
+  transition: all 0.3s ease;
+  border: 4px solid #e0e0e0;
+}
+
+.video-container.clickable {
+  cursor: pointer;
+}
+
+.video-container.listening {
+  border-color: #2ecc71;
+  box-shadow: 0 0 20px rgba(46, 204, 113, 0.4);
+}
+
+.video-container.speaking {
+  border-color: #3498db;
+  animation: speakingGlow 1.5s infinite;
+}
+
+@keyframes speakingGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(52, 152, 219, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(52, 152, 219, 0.8);
+  }
+}
+
+.video-container.pulse {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.novo-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatar-circle {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  transition: all 0.3s ease;
+}
+
+.avatar-circle.listening {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.avatar-circle.speaking {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  animation: speak 0.5s ease-in-out infinite;
+}
+
+.avatar-circle.disconnected {
+  background: linear-gradient(135deg, #bbb 0%, #888 100%);
+  opacity: 0.6;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes speak {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+.avatar-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+.avatar-eyes {
+  display: flex;
+  gap: 3rem;
+}
+
+.eye {
+  width: 40px;
+  height: 40px;
+  background: white;
+  border-radius: 50%;
+  position: relative;
+  animation: blink 4s infinite;
+}
+
+.eye::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: #333;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes blink {
+  0%,
+  96%,
+  100% {
+    transform: scaleY(1);
+  }
+  98% {
+    transform: scaleY(0.1);
+  }
+}
+
+.avatar-mouth {
+  width: 80px;
+  height: 40px;
+  border: 4px solid white;
+  border-top: none;
+  border-radius: 0 0 80px 80px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.speaking .avatar-mouth {
+  animation: talk 0.3s ease-in-out infinite;
+}
+
+@keyframes talk {
+  0%,
+  100% {
+    height: 40px;
+  }
+  50% {
+    height: 50px;
+  }
+}
+
+.sound-wave {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.sound-wave::before,
+.sound-wave::after {
+  content: '';
+  width: 4px;
+  background: white;
+  animation: wave 0.5s ease-in-out infinite;
+}
+
+.sound-wave::before {
+  height: 20px;
+  animation-delay: 0.1s;
+}
+
+.sound-wave::after {
+  height: 30px;
+  animation-delay: 0.2s;
+}
+
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.5);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.avatar-name {
+  font-size: 4rem;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.1em;
+}
+
+.video-status {
+  display: none;
+}

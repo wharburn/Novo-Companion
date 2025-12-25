@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Audio Files</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+    }
+    .file-input {
+      margin: 20px 0;
+      padding: 15px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      border: 2px dashed #ccc;
+    }
+    .result {
+      background: #e8f5e9;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 10px 0;
+      border-left: 4px solid #4CAF50;
+    }
+    .error {
+      background: #ffebee;
+      border-left-color: #f44336;
+    }
+    pre {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Verify Audio Files</h1>
+    <p>Upload your recorded WebM files to verify they contain valid audio data</p>
+
+    <div class="file-input">
+      <input type="file" id="audioFile" accept="audio/webm,audio/ogg" onchange="verifyAudio()">
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <script>
+    async function verifyAudio() {
+      const file = document.getElementById('audioFile').files[0];
+      if (!file) return;
+
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = '<p>Analyzing...</p>';
+
+      try {
+        // Read file
+        const arrayBuffer = await file.arrayBuffer();
+        const blob = new Blob([arrayBuffer], { type: file.type });
+
+        // Create audio element to verify it's playable
+        const audio = new Audio();
+        const url = URL.createObjectURL(blob);
+        audio.src = url;
+
+        audio.onloadedmetadata = () => {
+          const duration = audio.duration;
+          
+          // Convert to base64 to see what we're sending
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1];
+            
+            const result = `
+              <div class="result">
+                <h3>✅ Audio File Valid</h3>
+                <p><strong>Filename:</strong> ${file.name}</p>
+                <p><strong>Size:</strong> ${(file.size / 1024).toFixed(2)} KB</p>
+                <p><strong>Type:</strong> ${file.type}</p>
+                <p><strong>Duration:</strong> ${duration.toFixed(2)} seconds</p>
+                <p><strong>Base64 Length:</strong> ${base64.length} characters</p>
+                <p><strong>Base64 Preview (first 100 chars):</strong></p>
+                <pre>${base64.substring(0, 100)}...</pre>
+                <audio controls src="${url}" style="width: 100%; margin: 10px 0;"></audio>
+                <h4>Test: Send to Hume</h4>
+                <button onclick="testWithHume('${base64}', '${file.name}')">Send Full File to Hume</button>
+              </div>
+            `;
+            resultsDiv.innerHTML = result;
+          };
+          reader.readAsDataURL(blob);
+        };
+
+        audio.onerror = (e) => {
+          resultsDiv.innerHTML = `
+            <div class="result error">
+              <h3>❌ Audio File Invalid</h3>
+              <p>The file could not be loaded as audio. Error: ${audio.error?.message || 'Unknown'}</p>
+            </div>
+          `;
+        };
+
+      } catch (error) {
+        resultsDiv.innerHTML = `
+          <div class="result error">
+            <h3>❌ Error</h3>
+            <p>${error.message}</p>
+          </div>
+        `;
+      }
+    }
+
+    async function testWithHume(base64, filename) {
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML += '<p>🔌 Connecting to Hume...</p>';
+
+      try {
+        const ws = new WebSocket('ws://localhost:3000/api/hume/ws?userId=audio-test');
+        
+        ws.onopen = () => {
+          resultsDiv.innerHTML += '<p>✅ Connected! Sending audio...</p>';
+          
+          // Send the entire file as one audio_input message
+          const audioInput = {
+            type: 'audio_input',
+            data: base64
+          };
+          
+          ws.send(JSON.stringify(audioInput));
+          resultsDiv.innerHTML += '<p>📤 Sent full audio file to Hume</p>';
+          resultsDiv.innerHTML += '<p>⏳ Waiting for transcription...</p>';
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'user_message') {
+            resultsDiv.innerHTML += `
+              <div class="result">
+                <h3>✅ SUCCESS! Hume Transcribed:</h3>
+                <p><strong>"${data.message.content}"</strong></p>
+              </div>
+            `;
+            ws.close();
+          } else if (data.type === 'error') {
+            resultsDiv.innerHTML += `
+              <div class="result error">
+                <h3>❌ Hume Error:</h3>
+                <p>${data.code}: ${data.message}</p>
+              </div>
+            `;
+          } else {
+            resultsDiv.innerHTML += `<p>📥 Received: ${data.type}</p>`;
+          }
+        };
+
+        ws.onerror = (error) => {
+          resultsDiv.innerHTML += `
+            <div class="result error">
+              <h3>❌ WebSocket Error</h3>
+              <p>${error.message || 'Connection failed'}</p>
+            </div>
+          `;
+        };
+
+      } catch (error) {
+        resultsDiv.innerHTML += `
+          <div class="result error">
+            <h3>❌ Error</h3>
+            <p>${error.message}</p>
+          </div>
+        `;
+      }
+    }
+  </script>
+</body>
+</html>
+
