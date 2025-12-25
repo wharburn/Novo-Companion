@@ -17,6 +17,7 @@ import userRouter from './routes/user.js';
 import visionRouter from './routes/vision.js';
 
 // Import services
+import fs from 'fs';
 import { setupHumeWebSocket } from './services/humeEVI.js';
 import { initializeRedis } from './services/upstashRedis.js';
 import { initializeVector } from './services/upstashVector.js';
@@ -52,9 +53,10 @@ app.use('/api/family', familyRouter);
 app.use('/api/photos', photoRouter);
 app.use('/api/vision', visionRouter);
 
-// Serve static files from React app in production
-if (process.env.NODE_ENV === 'production') {
-  const clientBuildPath = path.join(__dirname, '../client/dist');
+// Serve static files from React app
+const clientBuildPath = path.join(__dirname, '../client/dist');
+if (fs.existsSync(clientBuildPath)) {
+  console.log('📁 Serving static files from:', clientBuildPath);
   app.use(express.static(clientBuildPath));
 
   app.get('*', (req, res) => {
