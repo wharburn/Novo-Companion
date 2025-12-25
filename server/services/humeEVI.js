@@ -138,10 +138,20 @@ export function setupHumeWebSocket(wss) {
       }
     });
 
+    // Message types that should NOT be forwarded to Hume
+    const localOnlyTypes = ['camera_enabled', 'camera_disabled', 'face_frame'];
+
     // Forward messages from client to Hume
     clientWs.on('message', async (message) => {
       try {
         const data = JSON.parse(message.toString());
+
+        // Handle local-only messages (don't forward to Hume)
+        if (localOnlyTypes.includes(data.type)) {
+          console.log(`📷 Client -> Server (local): ${data.type}`);
+          // TODO: Handle camera/face data locally if needed
+          return;
+        }
 
         if (data.type === 'audio_input') {
           audioChunkCount++;
