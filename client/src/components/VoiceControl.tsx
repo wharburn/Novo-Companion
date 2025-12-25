@@ -185,9 +185,13 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
-  // Audio queue and playback using HTMLAudioElement (Hume recommended approach)
-  const playNextAudio = useCallback(() => {
-    if (audioQueueRef.current.length === 0) {
+  // Current audio element for playback
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioBufferRef = useRef<Uint8Array[]>([]);
+
+  // Play buffered audio as one continuous stream
+  const playBufferedAudio = useCallback(() => {
+    if (audioBufferRef.current.length === 0) {
       isPlayingRef.current = false;
       setIsSpeaking(false);
       return;
@@ -196,29 +200,49 @@ const VoiceControl = ({
     isPlayingRef.current = true;
     setIsSpeaking(true);
 
-    const audioBlob = audioQueueRef.current.shift()!;
-    const audioUrl = URL.createObjectURL(audioBlob);
+    // Combine all chunks into one blob
+    const totalLength = audioBufferRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+    const combined = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of audioBufferRef.current) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    audioBufferRef.current = [];
+
+    const blob = new Blob([combined], { type: 'audio/mpeg' });
+    const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
+    currentAudioRef.current = audio;
 
     audio.onended = () => {
       URL.revokeObjectURL(audioUrl);
-      playNextAudio();
+      currentAudioRef.current = null;
+      // Check if more audio arrived while playing
+      if (audioBufferRef.current.length > 0) {
+        playBufferedAudio();
+      } else {
+        isPlayingRef.current = false;
+        setIsSpeaking(false);
+      }
     };
 
     audio.onerror = (err) => {
       console.error('Audio playback error:', err);
       URL.revokeObjectURL(audioUrl);
-      playNextAudio();
+      currentAudioRef.current = null;
+      isPlayingRef.current = false;
+      setIsSpeaking(false);
     };
 
     audio.play().catch((err) => {
       console.error('Failed to play audio:', err);
-      playNextAudio();
+      isPlayingRef.current = false;
+      setIsSpeaking(false);
     });
   }, []);
 
-  // Play audio from Hume (production mode)
-  // Hume sends MP3 audio as base64
+  // Buffer audio chunks from Hume (production mode)
   const playAudioChunk = useCallback(
     async (base64Audio: string) => {
       if (!isProduction) return; // Python server handles audio in dev
@@ -231,22 +255,25 @@ const VoiceControl = ({
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Create blob - Hume sends audio/mpeg (MP3)
-        const blob = new Blob([bytes], { type: 'audio/mpeg' });
-
-        // Add to queue
-        audioQueueRef.current.push(blob);
-
-        // Start playing if not already
-        if (!isPlayingRef.current) {
-          playNextAudio();
-        }
+        // Add to buffer
+        audioBufferRef.current.push(bytes);
+        setIsSpeaking(true);
       } catch (err) {
         console.error('Error processing audio:', err);
       }
     },
-    [isProduction, playNextAudio]
+    [isProduction]
   );
+
+  // Called when assistant finishes speaking - play all buffered audio
+  const onAssistantEnd = useCallback(() => {
+    if (audioBufferRef.current.length > 0 && !isPlayingRef.current) {
+      playBufferedAudio();
+    } else if (!isPlayingRef.current) {
+      setIsSpeaking(false);
+    }
+    setIsListening(true);
+  }, [playBufferedAudio]);
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {
@@ -475,8 +502,8 @@ const VoiceControl = ({
               }
               break;
             case 'assistant_end':
-              setIsSpeaking(false);
-              setIsListening(true);
+              // Play buffered audio when assistant finishes
+              onAssistantEnd();
               break;
             case 'error':
               console.error('Error:', data.message);
