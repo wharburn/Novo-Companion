@@ -266,7 +266,11 @@ const VoiceControl = ({
               break;
             }
             case 'assistant_message':
-              setTranscript((prev) => [...prev, `NoVo: ${data.content}`]);
+              // Hume sends content in data.message.content
+              const assistantContent = data.message?.content || data.content || '';
+              if (assistantContent) {
+                setTranscript((prev) => [...prev, `NoVo: ${assistantContent}`]);
+              }
               break;
             case 'emotions_detected':
               // Update top emotions display
