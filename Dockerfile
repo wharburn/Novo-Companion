@@ -12,8 +12,8 @@ RUN npm ci
 # Copy client source
 COPY client/ ./
 
-# Build client (skip type checking for faster builds)
-RUN npm run build -- --skipLibCheck
+# Build client
+RUN npm run build
 
 # Production stage
 FROM node:20-alpine
