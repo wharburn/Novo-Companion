@@ -31,6 +31,7 @@ export function setupHumeWebSocket(wss) {
     let humeWs = null;
     let audioChunkCount = 0;
     let audioOutputCount = 0;
+    let assistantIsSpeaking = false; // Flag to pause mic input while assistant speaks
 
     // Connect to Hume EVI using raw WebSocket
     const humeUrl = `wss://api.hume.ai/v0/evi/chat?api_key=${HUME_API_KEY}&config_id=${HUME_CONFIG_ID}`;
@@ -90,7 +91,8 @@ export function setupHumeWebSocket(wss) {
             timestamp: new Date().toISOString(),
           }).catch((err) => console.error('Error saving assistant message:', err));
         } else if (data.type === 'audio_output') {
-          // Log all audio chunks for debugging
+          // Assistant is speaking - pause mic input
+          assistantIsSpeaking = true;
           audioOutputCount++;
           if (audioOutputCount === 1 || audioOutputCount % 10 === 0) {
             console.log(
@@ -99,6 +101,10 @@ export function setupHumeWebSocket(wss) {
               } chars`
             );
           }
+        } else if (data.type === 'assistant_end') {
+          // Assistant finished speaking - resume mic input
+          assistantIsSpeaking = false;
+          console.log('📥 Hume -> Client: assistant_end');
         } else if (data.type === 'chat_metadata') {
           console.log('📥 Hume -> Client: chat_metadata');
           console.log('   Chat ID:', data.chat_id);
@@ -165,17 +171,19 @@ export function setupHumeWebSocket(wss) {
             try {
               const result = await analyzeImage(
                 data.data,
-                'Briefly describe what you see in this webcam image. Focus on the person and their surroundings. Keep it under 2 sentences.'
+                'In under 100 characters, describe the person you see.'
               );
 
               if (result.success && humeWs && humeWs.readyState === WebSocket.OPEN) {
-                console.log('📷 Vision context:', result.description.substring(0, 100) + '...');
+                // Truncate to ensure under 256 chars total
+                const desc = result.description.substring(0, 150);
+                console.log('📷 Vision context:', desc);
 
-                // Send as assistant_input with instruction not to repeat
+                // Send short context as assistant_input
                 humeWs.send(
                   JSON.stringify({
                     type: 'assistant_input',
-                    text: `(I can now see the user through their camera: ${result.description}. I will acknowledge this briefly without repeating the description verbatim.)`,
+                    text: `(I see: ${desc}. Briefly acknowledge.)`,
                   })
                 );
               }
@@ -188,6 +196,12 @@ export function setupHumeWebSocket(wss) {
 
         if (data.type === 'audio_input') {
           audioChunkCount++;
+
+          // Skip forwarding audio while assistant is speaking to prevent interruptions
+          if (assistantIsSpeaking) {
+            return; // Don't forward mic input while assistant speaks
+          }
+
           if (audioChunkCount === 1 || audioChunkCount % 50 === 0) {
             console.log(`📤 Client -> Hume: audio_input #${audioChunkCount}`);
           }
