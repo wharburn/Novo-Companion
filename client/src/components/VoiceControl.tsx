@@ -185,61 +185,88 @@ const VoiceControl = ({
     setIsListening(false);
   }, []);
 
-  // Audio queue for sequential playback
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const audioBlobQueueRef = useRef<Blob[]>([]);
-  const isQueuePlayingRef = useRef<boolean>(false);
+  // Web Audio API for gapless playback
+  const playbackContextRef = useRef<AudioContext | null>(null);
+  const audioBuffersRef = useRef<ArrayBuffer[]>([]);
 
-  // Play next blob in queue
-  const playNextInQueue = useCallback(() => {
-    if (audioBlobQueueRef.current.length === 0) {
-      console.log('🔊 Queue empty, playback complete');
-      isQueuePlayingRef.current = false;
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
+  // Play all buffered audio using Web Audio API for gapless playback
+  const playBufferedAudio = useCallback(async () => {
+    if (audioBuffersRef.current.length === 0) {
       setIsListening(true);
       return;
     }
 
-    const blob = audioBlobQueueRef.current.shift()!;
-    const audioUrl = URL.createObjectURL(blob);
-    const audio = new Audio(audioUrl);
-    currentAudioRef.current = audio;
+    console.log(`🔊 Decoding ${audioBuffersRef.current.length} audio chunks...`);
 
-    audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
-      currentAudioRef.current = null;
-      // Play next immediately
-      playNextInQueue();
-    };
+    // Create audio context for playback
+    const ctx = new AudioContext();
+    playbackContextRef.current = ctx;
 
-    audio.onerror = () => {
-      URL.revokeObjectURL(audioUrl);
-      currentAudioRef.current = null;
-      // Skip to next on error
-      playNextInQueue();
-    };
-
-    audio.play().catch(() => {
-      // Skip to next on play error
-      playNextInQueue();
-    });
-  }, []);
-
-  // Start playing the queue
-  const startQueuePlayback = useCallback(() => {
-    if (audioBlobQueueRef.current.length === 0) {
-      setIsListening(true);
-      return;
-    }
-
-    console.log(`🔊 Starting playback of ${audioBlobQueueRef.current.length} audio chunks`);
-    isQueuePlayingRef.current = true;
     isPlayingRef.current = true;
     setIsSpeaking(true);
     setIsListening(false);
-    playNextInQueue();
-  }, [playNextInQueue]);
+
+    try {
+      // Decode all chunks to AudioBuffers
+      const buffers = audioBuffersRef.current;
+      audioBuffersRef.current = [];
+
+      const decodedBuffers: AudioBuffer[] = [];
+      for (const buf of buffers) {
+        try {
+          const decoded = await ctx.decodeAudioData(buf.slice(0)); // slice to clone
+          decodedBuffers.push(decoded);
+        } catch (e) {
+          console.warn('🔊 Failed to decode chunk, skipping');
+        }
+      }
+
+      if (decodedBuffers.length === 0) {
+        console.log('🔊 No audio decoded');
+        ctx.close();
+        isPlayingRef.current = false;
+        setIsSpeaking(false);
+        setIsListening(true);
+        return;
+      }
+
+      // Calculate total duration
+      let totalDuration = 0;
+      for (const buf of decodedBuffers) {
+        totalDuration += buf.duration;
+      }
+      console.log(
+        `🔊 Playing ${decodedBuffers.length} chunks, total duration: ${totalDuration.toFixed(2)}s`
+      );
+
+      // Schedule all buffers to play back-to-back
+      let startTime = ctx.currentTime;
+      for (const buffer of decodedBuffers) {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(startTime);
+        startTime += buffer.duration;
+      }
+
+      // Set timeout for when playback ends
+      setTimeout(() => {
+        console.log('🔊 Playback complete');
+        ctx.close();
+        playbackContextRef.current = null;
+        isPlayingRef.current = false;
+        setIsSpeaking(false);
+        setIsListening(true);
+      }, totalDuration * 1000 + 100);
+    } catch (err) {
+      console.error('🔊 Playback error:', err);
+      ctx.close();
+      playbackContextRef.current = null;
+      isPlayingRef.current = false;
+      setIsSpeaking(false);
+      setIsListening(true);
+    }
+  }, []);
 
   // Buffer audio chunks from Hume (production mode)
   const playAudioChunk = useCallback(
@@ -247,15 +274,13 @@ const VoiceControl = ({
       if (!isProduction) return; // Python server handles audio in dev
 
       try {
-        // Decode base64 to binary and create blob
+        // Decode base64 to ArrayBuffer
         const binaryString = atob(base64Audio);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
-
-        const blob = new Blob([bytes], { type: 'audio/mpeg' });
-        audioBlobQueueRef.current.push(blob);
+        audioBuffersRef.current.push(bytes.buffer);
       } catch (err) {
         console.error('Error processing audio:', err);
       }
@@ -263,15 +288,15 @@ const VoiceControl = ({
     [isProduction]
   );
 
-  // Called when assistant finishes - start sequential playback
+  // Called when assistant finishes - decode and play all audio
   const onAssistantEnd = useCallback(() => {
-    console.log(`🔊 assistant_end, ${audioBlobQueueRef.current.length} chunks queued`);
-    if (!isQueuePlayingRef.current && audioBlobQueueRef.current.length > 0) {
-      startQueuePlayback();
-    } else if (audioBlobQueueRef.current.length === 0) {
+    console.log(`🔊 assistant_end, ${audioBuffersRef.current.length} chunks buffered`);
+    if (audioBuffersRef.current.length > 0 && !isPlayingRef.current) {
+      playBufferedAudio();
+    } else if (audioBuffersRef.current.length === 0) {
       setIsListening(true);
     }
-  }, [startQueuePlayback]);
+  }, [playBufferedAudio]);
 
   // Capture and send webcam frame
   const captureAndSendFrame = useCallback(() => {
