@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { extractLearnings } from './learningEngine.js';
 import { saveConversation } from './upstashRedis.js';
+import { analyzeImage } from './visionAI.js';
 
 const HUME_API_KEY = process.env.HUME_API_KEY;
 const HUME_CONFIG_ID = process.env.NEXT_PUBLIC_HUME_CONFIG_ID;
@@ -139,6 +140,8 @@ export function setupHumeWebSocket(wss) {
 
     // Message types that should NOT be forwarded to Hume
     const localOnlyTypes = ['camera_enabled', 'camera_disabled', 'face_frame'];
+    let cameraEnabled = false;
+    let firstFrameProcessed = false;
 
     // Forward messages from client to Hume
     clientWs.on('message', async (message) => {
@@ -147,8 +150,42 @@ export function setupHumeWebSocket(wss) {
 
         // Handle local-only messages (don't forward to Hume)
         if (localOnlyTypes.includes(data.type)) {
-          console.log(`📷 Client -> Server (local): ${data.type}`);
-          // TODO: Handle camera/face data locally if needed
+          if (data.type === 'camera_enabled') {
+            console.log('📷 Camera enabled by user');
+            cameraEnabled = true;
+            firstFrameProcessed = false;
+          } else if (data.type === 'camera_disabled') {
+            console.log('📷 Camera disabled by user');
+            cameraEnabled = false;
+          } else if (data.type === 'face_frame' && cameraEnabled && !firstFrameProcessed) {
+            // Process first frame after camera enabled
+            firstFrameProcessed = true;
+            console.log('📷 Processing first camera frame...');
+
+            try {
+              const result = await analyzeImage(
+                data.data,
+                'Briefly describe what you see in this webcam image. Focus on the person and their surroundings. Keep it under 2 sentences.'
+              );
+
+              if (result.success && humeWs && humeWs.readyState === WebSocket.OPEN) {
+                const contextMsg = `The user just enabled their camera. ${result.description}`;
+                console.log(
+                  '📷 Sending vision context to Hume:',
+                  contextMsg.substring(0, 100) + '...'
+                );
+
+                humeWs.send(
+                  JSON.stringify({
+                    type: 'assistant_input',
+                    text: `[VISUAL CONTEXT: ${contextMsg}]`,
+                  })
+                );
+              }
+            } catch (err) {
+              console.error('📷 Vision analysis error:', err.message);
+            }
+          }
           return;
         }
 
