@@ -25,7 +25,8 @@ router.post('/analyze', async (req, res) => {
         'Briefly describe what you see in this image in 1-2 sentences. Focus on the person and their surroundings. Be warm and friendly.'
       );
       if (result.success && result.description) {
-        contextForEVI = `[SYSTEM CONTEXT: The user just enabled their camera. ${result.description} Acknowledge that you can now see them and comment warmly on what you observe.]`;
+        // Send as invisible assistant context, not as user message
+        contextForEVI = `You can now see the user through the camera. Here's what you observe: ${result.description}. Acknowledge that you can see them and make a brief, warm observation.`;
       }
     } else if (type === 'picture') {
       // User took a picture - describe it

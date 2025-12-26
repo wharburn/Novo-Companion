@@ -322,8 +322,12 @@ const VoiceControl = ({
         });
         const result = await response.json();
         if (result.success && result.data?.context && socketRef.current) {
-          // Inject vision context into EVI conversation
-          socketRef.current.sendUserInput(result.data.context);
+          // For camera_frame: use assistant_input (invisible context injection)
+          // For picture: this will be handled by the tool call response
+          if (type === 'camera_frame') {
+            socketRef.current.sendAssistantInput({ text: result.data.context });
+            console.log('📷 Camera context injected (invisible to user)');
+          }
         }
       } catch (error) {
         console.error('Error sending image to server:', error);
@@ -374,20 +378,14 @@ const VoiceControl = ({
 
       setIsCameraOn(true);
 
-      // Wait for video to be ready, then capture first frame
+      // Wait for video to be ready, then capture ONLY the first frame
       await new Promise((resolve) => setTimeout(resolve, 300));
       captureAndSendFrame();
 
-      // Start sending frames periodically
-      frameIntervalRef.current = window.setInterval(captureAndSendFrame, FRAME_INTERVAL_MS);
-      console.log('📷 Expression camera started');
-
-      // Notify NoVo that she can now see the user
-      if (socketRef.current) {
-        socketRef.current.sendUserInput(
-          '[The user just turned on their camera. You can now see them. Briefly acknowledge that you can see them now and make a friendly observation about them.]'
-        );
-      }
+      console.log('📷 Expression camera started - initial frame sent');
+      
+      // Note: We only send the initial frame, not continuous frames
+      // Continuous vision analysis would be too expensive and disruptive
     } catch (error) {
       console.error('Error starting expression camera:', error);
     }
