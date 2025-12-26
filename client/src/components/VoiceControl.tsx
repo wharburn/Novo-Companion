@@ -32,7 +32,7 @@ const FRAME_INTERVAL_MS = 1000; // Send a frame every 1 second
 // Get API base URL for server calls (vision, etc.)
 const getApiBaseUrl = () => {
   if (import.meta.env?.DEV) {
-    return 'http://localhost:3001';
+    return 'http://localhost:3000';
   }
   return '';
 };
@@ -343,11 +343,14 @@ const VoiceControl = ({
   // Connect to Hume EVI using TypeScript SDK
   const connect = useCallback(async () => {
     try {
+      console.log('🔄 Connect function called...');
       setStatus('Getting access token...');
 
       // Fetch access token from our server
+      console.log('🔑 Fetching access token from:', `${getApiBaseUrl()}/api/hume/access-token`);
       const tokenResponse = await fetch(`${getApiBaseUrl()}/api/hume/access-token`);
       const tokenData = await tokenResponse.json();
+      console.log('🔑 Token response:', tokenData);
 
       if (!tokenData.success || !tokenData.data?.accessToken) {
         throw new Error('Failed to get access token');
@@ -365,14 +368,16 @@ const VoiceControl = ({
       playerRef.current = player;
 
       // Connect to EVI
+      console.log('🔌 Connecting to EVI with configId:', configId);
       const socket = await client.empathicVoice.chat.connect({
         configId,
       });
+      console.log('🔌 Socket created:', socket);
       socketRef.current = socket;
 
       // Set up event handlers
       socket.on('open', async () => {
-        console.log('✅ Connected to Hume EVI');
+        console.log('✅ Connected to Hume EVI - WebSocket open');
         setIsConnected(true);
         setStatus('Connected - Speak now!');
 
