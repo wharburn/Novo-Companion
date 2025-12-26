@@ -293,6 +293,7 @@
   overflow: hidden;
   background: #000;
   aspect-ratio: 4/3;
+  position: relative;
 }
 
 .picture-viewfinder video {
@@ -300,6 +301,31 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Camera flash effect */
+.camera-flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: white;
+  opacity: 0;
+  pointer-events: none;
+  animation: flash 0.3s ease-out;
+}
+
+@keyframes flash {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .picture-modal-controls {

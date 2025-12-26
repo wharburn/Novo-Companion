@@ -432,11 +432,24 @@ const VoiceControl = ({
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        // Trigger visual flash effect
+        triggerFlash();
+
+        // Play camera shutter sound
+        const shutterSound = new Audio(
+          'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGGS57OihUBELTKXh8LJnHgU2jdXvzHkpBSh+zPDckj0JFF+16+qnVRQLR6Hf8r1uIAUrlc/y2Ik2Bxhju+zooVARC0yl4fCyZx4FNo3V78x5KQUofszw3JI9CRRftevqp1UVC0eh3/K9biAFK5XP8tiJNgcYY7vs6KFQEQtMpeHwsmceBTaN1e/MeSkFKH7M8NySPQkUX7Xr6qdVFQtHod/yvW4gBSuVz/LYiTYHGGO77OihUBELTKXh8LJnHgU2jdXvzHkpBSh+zPDckj0JFF+16+qnVRULR6Hf8r1uIAUrlc/y2Ik2Bxhju+zooVARC0yl4fCyZx4FNo3V78x5KQUofszw3JI9CRRftevqp1UVC0eh3/K9biAFK5XP8tiJNgcYY7vs6KFQEQtMpeHwsmceBTaN1e/MeSkFKH7M8NySPQkUX7Xr6qdVFQtHod/yvW4gBSuVz/LYiTYHGGO77OihUBELTKXh8LJnHgU2jdXvzHkpBSh+zPDckj0JFF+16+qnVRULR6Hf8r1uIAUrlc/y2Ik2Bxhju+zooVARC0yl4fCyZx4FNo3V78x5KQUofszw3JI9CRRftevqp1UVC0eh3/K9biAFK5XP8tiJNgcYY7vs6KFQEQtMpeHwsmceBTaN1e/MeSkFKH7M8NySPQkUX7Xr6qdVFQtHod/yvW4gBSuVz/LYiTYHGGO77OihUBELTKXh8LJnHgU2jdXvzHkpBSh+zPDckj0JFF+16+qnVRULR6Hf8r1uIAUrlc/y2Ik2Bxhju+zooVARC0yl4fCyZx4FNo3V78x5KQUofszw3JI9CRRftevqp1UVC0eh3/K9biAFK5XP8tiJNgcYY7vs6KFQEQtMpeHwsmceBTaN1e/MeSkFKH7M8NySPQkUX7Xr6qdVFQtHod/yvW4gBSuVz/LYiTYHGGO77OihUBELTKXh8LJnHgU2jdXvzHkpBSh+zPDckj0JFF+16+qnVRULR6Hf8r1uIAUrlc/y2Ik2Bxhju+zooVARC0yl4fCyZx4FNo3V78x5KQUofszw3JI9CRRftevqp1UVC0eh3/K9biAFK5XP8tiJNgcYY7vs6KFQEQtMpeHwsmceBTaN1e/MeSkFKH7M8NySPQkUX7Xr6qdVFQtHod/yvW4gBSuVz/LYiTYHGGO77OihUBELTKXh8LJnHgU2jdXvzHkpBSh+zPDckj0JFF+16+qnVRULR6Hf8r1uIAUrlc/y2Ik2Bxhju+zooVARC0yl4fCyZx4FNo3V78x5KQUofszw3JI9CRRftevqp1UVC0eh3/K9biAFK5XP8tiJNgcYY7vs6KFQEQtMpeHwsmceBTaN1e/MeSkFKH7M8NySPQkUX7Xr6qdVFQtHod/yvW4gBQ=='
+        );
+        shutterSound.volume = 0.3;
+        shutterSound.play().catch((e) => console.log('Could not play shutter sound:', e));
+
         canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 480;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
         const base64Data = dataUrl.split(',')[1];
+
+        // Close modal immediately after capture
+        closePictureModal();
 
         // Analyze the image first to get description
         try {
@@ -501,8 +514,7 @@ const VoiceControl = ({
         }
       }
     }
-    closePictureModal();
-  }, [userId]);
+  }, [userId, triggerFlash]);
 
   // Stop webcam capture
   const stopWebcam = useCallback(() => {
@@ -678,6 +690,7 @@ const VoiceControl = ({
             </div>
             <div className="picture-viewfinder">
               <video ref={pictureVideoRef} autoPlay playsInline muted />
+              {showFlash && <div className="camera-flash" />}
             </div>
             <div className="picture-modal-controls">
               <button type="button" className="capture-btn" onClick={capturePicture}>
