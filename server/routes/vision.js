@@ -22,20 +22,20 @@ router.post('/analyze', async (req, res) => {
       // Camera enabled - describe what we see and generate EVI context
       result = await analyzeImage(
         imgData,
-        'Briefly describe what you see in this image in 1-2 sentences. Focus on the person and their surroundings. Be warm and friendly.'
+        'Describe what you see in detail: the person (their clothing, appearance, expression), the room (lighting, colors, objects visible), and the overall atmosphere. Be warm, personal, and detailed - as if greeting someone you care about. Include 3-4 specific observations.'
       );
       if (result.success && result.description) {
         // Send as invisible assistant context, not as user message
-        contextForEVI = `You can now see the user through the camera. Here's what you observe: ${result.description}. Acknowledge that you can see them and make a brief, warm observation.`;
+        contextForEVI = `You can now see the user through the camera. Here's what you observe: ${result.description}. Acknowledge that you can see them warmly and personally, mentioning specific details like what they're wearing and their surroundings.`;
       }
     } else if (type === 'picture') {
-      // User took a picture - describe it
+      // User took a picture - describe it in detail
       result = await analyzeImage(
         imgData,
-        'Describe what you see in this image in detail. Be specific about objects, people, text, and context. Be warm and friendly.'
+        'Describe this image in rich detail: identify people (their clothing, expressions, activities), objects, colors, text, setting, lighting, and mood. Provide 4-5 specific observations that would help someone understand exactly what is captured in this photo. Be warm and descriptive.'
       );
       if (result.success && result.description) {
-        contextForEVI = result.description;
+        contextForEVI = `A photo was just taken. Here's what it shows: ${result.description}`;
       }
     } else if (context) {
       // Use specialized analysis for elderly users

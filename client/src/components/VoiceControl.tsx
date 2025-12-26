@@ -437,16 +437,24 @@ const VoiceControl = ({
 
         // Analyze the image first to get description
         try {
+          console.log('🔍 Analyzing picture...');
           const response = await fetch(`${getApiBaseUrl()}/api/vision/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: base64Data, type: 'picture' }),
           });
+          
+          if (!response.ok) {
+            throw new Error(`Vision API error: ${response.status}`);
+          }
+          
           const result = await response.json();
+          console.log('Vision analysis result:', result);
 
           if (result.success && result.description) {
             // Save photo with description
-            await fetch(`${getApiBaseUrl()}/api/photos/${userId}/save-photo`, {
+            console.log('💾 Saving photo to album...');
+            const saveResponse = await fetch(`${getApiBaseUrl()}/api/photos/${userId}/save-photo`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -455,16 +463,28 @@ const VoiceControl = ({
                 subject: 'general',
               }),
             });
+            
+            if (!saveResponse.ok) {
+              throw new Error(`Photo save error: ${saveResponse.status}`);
+            }
+            
+            const saveResult = await saveResponse.json();
+            console.log('Photo save result:', saveResult);
 
             // Also send to EVI for conversation context (if connected)
             if (socketRef.current && result.data?.context) {
               socketRef.current.sendAssistantInput({ text: result.data.context });
             }
 
-            console.log('📸 Picture captured, analyzed, and saved');
+            console.log('✅ Picture captured, analyzed, and saved to album');
+            alert('Photo saved to album!');
+          } else {
+            console.error('Vision analysis failed:', result);
+            alert('Failed to analyze photo: ' + (result.error || 'Unknown error'));
           }
         } catch (error) {
           console.error('Error processing picture:', error);
+          alert('Error saving photo: ' + (error instanceof Error ? error.message : 'Unknown error'));
         }
       }
     }
