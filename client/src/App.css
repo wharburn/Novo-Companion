@@ -29,7 +29,8 @@
 
 .header-logo img {
   height: 60px;
-  width: auto;
+  max-width: 70vw;
+  object-fit: contain;
   pointer-events: none;
 }
 
