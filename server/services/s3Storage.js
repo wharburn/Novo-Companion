@@ -19,7 +19,7 @@ const s3 = new AWS.S3(s3Config);
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 
 // Upload family photo
-export async function uploadFamilyPhoto(userId, memberName, fileBuffer, mimeType) {
+export async function uploadFamilyPhoto(userId, memberName, fileBuffer, mimeType, description = '') {
   try {
     const fileExtension = mimeType.split('/')[1];
     const fileName = `${uuidv4()}.${fileExtension}`;
@@ -31,6 +31,11 @@ export async function uploadFamilyPhoto(userId, memberName, fileBuffer, mimeType
       Body: fileBuffer,
       ContentType: mimeType,
       ServerSideEncryption: 'AES256',
+      Metadata: {
+        description: description || 'No description',
+        memberName: memberName,
+        uploadedAt: new Date().toISOString(),
+      },
     };
 
     const result = await s3.upload(params).promise();
@@ -39,6 +44,7 @@ export async function uploadFamilyPhoto(userId, memberName, fileBuffer, mimeType
       success: true,
       url: result.Location,
       key: result.Key,
+      description,
     };
   } catch (error) {
     console.error('Error uploading to S3:', error);
@@ -62,10 +68,12 @@ export async function getSignedPhotoUrl(key, expiresIn = 3600) {
   }
 }
 
-// List all photos for a family member
+// List all photos for a family member (or all if memberName is null)
 export async function listFamilyPhotos(userId, memberName) {
   try {
-    const prefix = `users/${userId}/family/${memberName}/photos/`;
+    const prefix = memberName 
+      ? `users/${userId}/family/${memberName}/photos/`
+      : `users/${userId}/family/`;
 
     const params = {
       Bucket: BUCKET_NAME,
@@ -75,12 +83,22 @@ export async function listFamilyPhotos(userId, memberName) {
     const result = await s3.listObjectsV2(params).promise();
 
     const photos = await Promise.all(
-      result.Contents.map(async (item) => ({
-        key: item.Key,
-        url: await getSignedPhotoUrl(item.Key),
-        lastModified: item.LastModified,
-        size: item.Size,
-      }))
+      (result.Contents || []).map(async (item) => {
+        // Get metadata for description
+        const headResult = await s3.headObject({
+          Bucket: BUCKET_NAME,
+          Key: item.Key,
+        }).promise();
+
+        return {
+          key: item.Key,
+          url: await getSignedPhotoUrl(item.Key),
+          lastModified: item.LastModified,
+          size: item.Size,
+          description: headResult.Metadata?.description || 'No description',
+          memberName: headResult.Metadata?.membername || 'Unknown',
+        };
+      })
     );
 
     return photos;

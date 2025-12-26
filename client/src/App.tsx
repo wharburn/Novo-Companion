@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
 import FamilyAlbum from './components/FamilyAlbum';
+import PhotoAlbum from './components/PhotoAlbum';
 import SettingsPanel from './components/SettingsPanel';
 import VideoPlayer from './components/VideoPlayer';
 import VoiceControl from './components/VoiceControl';
@@ -9,7 +10,7 @@ const USER_ID = 'demo-user'; // In production, this would come from authenticati
 const LONG_PRESS_DURATION = 5000; // 5 seconds to open settings
 
 function App() {
-  const [activeView, setActiveView] = useState<'main' | 'family' | 'settings'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'family' | 'settings' | 'photos'>('main');
   const [_showCamera, _setShowCamera] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [voiceState, setVoiceState] = useState({
@@ -148,11 +149,14 @@ function App() {
               onStateChange={setVoiceState}
               onConnectRef={connectRef}
               onDisconnectRef={disconnectRef}
+              onViewPhotos={() => setActiveView('photos')}
             />
           </div>
         )}
 
         {activeView === 'family' && <FamilyAlbum userId={USER_ID} />}
+
+        {activeView === 'photos' && <PhotoAlbum userId={USER_ID} onClose={() => setActiveView('main')} />}
 
         {activeView === 'settings' && userProfile && (
           <SettingsPanel

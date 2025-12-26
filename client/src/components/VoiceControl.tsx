@@ -25,6 +25,7 @@ interface VoiceControlProps {
   onEmotionsDetected?: (emotions: Array<{ name: string; score: number }>) => void;
   onConnectRef?: React.MutableRefObject<(() => void) | null>;
   onDisconnectRef?: React.MutableRefObject<(() => void) | null>;
+  onViewPhotos?: () => void;
 }
 
 const FRAME_INTERVAL_MS = 1000; // Send a frame every 1 second
@@ -38,11 +39,12 @@ const getApiBaseUrl = () => {
 };
 
 const VoiceControl = ({
-  userId: _userId,
+  userId,
   onStateChange,
   onEmotionsDetected,
   onConnectRef,
   onDisconnectRef,
+  onViewPhotos,
 }: VoiceControlProps) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -420,8 +422,8 @@ const VoiceControl = ({
     setShowPictureModal(false);
   };
 
-  // Capture picture and send to server for analysis
-  const capturePicture = useCallback(() => {
+  // Capture picture and send to server for analysis and save
+  const capturePicture = useCallback(async () => {
     if (pictureVideoRef.current && canvasRef.current) {
       const video = pictureVideoRef.current;
       const canvas = canvasRef.current;
@@ -433,12 +435,41 @@ const VoiceControl = ({
         const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
         const base64Data = dataUrl.split(',')[1];
 
-        sendImageToServer(base64Data, 'picture');
-        console.log('📸 Picture captured and sent');
+        // Analyze the image first to get description
+        try {
+          const response = await fetch(`${getApiBaseUrl()}/api/vision/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64Data, type: 'picture' }),
+          });
+          const result = await response.json();
+
+          if (result.success && result.description) {
+            // Save photo with description
+            await fetch(`${getApiBaseUrl()}/api/photos/${userId}/save-photo`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image: dataUrl,
+                description: result.description,
+                subject: 'general',
+              }),
+            });
+
+            // Also send to EVI for conversation context (if connected)
+            if (socketRef.current && result.data?.context) {
+              socketRef.current.sendAssistantInput({ text: result.data.context });
+            }
+
+            console.log('📸 Picture captured, analyzed, and saved');
+          }
+        } catch (error) {
+          console.error('Error processing picture:', error);
+        }
       }
     }
     closePictureModal();
-  }, [sendImageToServer]);
+  }, [userId]);
 
   // Stop webcam capture
   const stopWebcam = useCallback(() => {
@@ -594,6 +625,15 @@ const VoiceControl = ({
         >
           Take a Picture for Me
           <span className="btn-icon">📷</span>
+        </button>
+
+        <button
+          type="button"
+          className="album-btn"
+          onClick={onViewPhotos}
+        >
+          View Photo Album
+          <span className="btn-icon">🖼️</span>
         </button>
       </div>
 
