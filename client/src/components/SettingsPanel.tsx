@@ -17,6 +17,7 @@ interface Settings {
   visionProvider: 'gpt4' | 'claude';
   videoQuality: '360p' | '480p' | '720p';
   voiceSpeed: number;
+  language: 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'zh' | 'ja' | 'ko';
 }
 
 interface SettingsPanelProps {
@@ -55,6 +56,24 @@ const SettingsPanel = ({ settings, onUpdate, userId }: SettingsPanelProps) => {
 
       <div className="settings-section">
         <h3>Conversation Settings</h3>
+
+        <div className="setting-item">
+          <label>Language</label>
+          <select
+            value={localSettings.language || 'en'}
+            onChange={(e) => handleChange('language', e.target.value)}
+          >
+            <option value="en">English</option>
+            <option value="es">Español (Spanish)</option>
+            <option value="fr">Français (French)</option>
+            <option value="de">Deutsch (German)</option>
+            <option value="it">Italiano (Italian)</option>
+            <option value="pt">Português (Portuguese)</option>
+            <option value="zh">中文 (Chinese)</option>
+            <option value="ja">日本語 (Japanese)</option>
+            <option value="ko">한국어 (Korean)</option>
+          </select>
+        </div>
 
         <div className="setting-item">
           <label>Conversation Mode</label>

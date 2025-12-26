@@ -24,30 +24,41 @@ router.post('/analyze', async (req, res) => {
         imgData,
         'Briefly describe what you see in this image in 1-2 sentences. Focus on the person and their surroundings. Be warm and friendly.'
       );
-      if (result.success && result.data?.analysis) {
-        contextForEVI = `[SYSTEM CONTEXT: The user just enabled their camera. ${result.data.analysis} Acknowledge that you can now see them and comment warmly on what you observe.]`;
+      if (result.success && result.description) {
+        contextForEVI = `[SYSTEM CONTEXT: The user just enabled their camera. ${result.description} Acknowledge that you can now see them and comment warmly on what you observe.]`;
       }
     } else if (type === 'picture') {
       // User took a picture - describe it
       result = await analyzeImage(
         imgData,
-        'Briefly describe what you see in this image in 1-2 sentences. Focus on the main subject. Be warm and friendly.'
+        'Describe what you see in this image in detail. Be specific about objects, people, text, and context. Be warm and friendly.'
       );
-      if (result.success && result.data?.analysis) {
-        contextForEVI = `[SYSTEM CONTEXT: The user just took a picture to show you. Here's what's in the image: ${result.data.analysis} Acknowledge that you received the photo and describe what you see in a warm, friendly way. Then, ask the user why they wanted to take this photo or how it's relevant to them.]`;
+      if (result.success && result.description) {
+        contextForEVI = result.description;
       }
     } else if (context) {
       // Use specialized analysis for elderly users
       result = await analyzeForElderly(imgData, context);
+      if (result.success && result.description) {
+        contextForEVI = result.description;
+      }
     } else {
       // General analysis
       result = await analyzeImage(imgData, prompt, provider);
+      if (result.success && result.description) {
+        contextForEVI = result.description;
+      }
     }
 
-    // Add context for EVI if generated
+    // Add context for EVI
     if (contextForEVI && result.success) {
-      result.data = result.data || {};
-      result.data.context = contextForEVI;
+      result.data = {
+        context: contextForEVI,
+        analysis: result.description,
+        provider: result.provider,
+      };
+    } else if (!result.success) {
+      return res.status(500).json(result);
     }
 
     res.json(result);

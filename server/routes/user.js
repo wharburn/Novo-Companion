@@ -8,7 +8,7 @@ router.get('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const profile = await getUserProfile(userId);
-    
+
     if (!profile) {
       // Create default profile
       const defaultProfile = {
@@ -18,7 +18,7 @@ router.get('/:userId', async (req, res) => {
           checkInTimes: {
             morning: '09:00',
             afternoon: '14:00',
-            evening: '19:00'
+            evening: '19:00',
           },
           chattiness: 'moderate',
           questionFrequency: 'medium',
@@ -27,21 +27,22 @@ router.get('/:userId', async (req, res) => {
           enableFamilyTree: true,
           visionProvider: 'gpt4',
           videoQuality: '720p',
-          voiceSpeed: 1.0
+          voiceSpeed: 1.0,
+          language: 'en',
         },
         knownInfo: {
           medical: [],
           medications: [],
           routines: {},
-          preferences: {}
+          preferences: {},
         },
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       };
-      
+
       await saveUserProfile(userId, defaultProfile);
       return res.json({ success: true, data: defaultProfile });
     }
-    
+
     res.json({ success: true, data: profile });
   } catch (error) {
     console.error('Error getting user profile:', error);
@@ -54,9 +55,9 @@ router.put('/:userId/settings', async (req, res) => {
   try {
     const { userId } = req.params;
     const settings = req.body;
-    
+
     const updatedProfile = await updateUserSettings(userId, settings);
-    
+
     res.json({ success: true, data: updatedProfile });
   } catch (error) {
     console.error('Error updating settings:', error);
@@ -69,13 +70,13 @@ router.put('/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const profileData = req.body;
-    
+
     await saveUserProfile(userId, {
       ...profileData,
       userId,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
     });
-    
+
     res.json({ success: true, data: profileData });
   } catch (error) {
     console.error('Error updating profile:', error);
@@ -84,4 +85,3 @@ router.put('/:userId', async (req, res) => {
 });
 
 export default router;
-

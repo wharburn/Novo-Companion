@@ -49,9 +49,16 @@ const VoiceControl = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [showPictureModal, setShowPictureModal] = useState(false);
+  const [showFlash, setShowFlash] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
   const [_status, setStatus] = useState('Tap avatar to connect');
   const [topEmotions, setTopEmotions] = useState<Array<{ name: string; score: number }>>([]);
+
+  // Trigger camera flash effect
+  const triggerFlash = useCallback(() => {
+    setShowFlash(true);
+    setTimeout(() => setShowFlash(false), 300);
+  }, []);
 
   // Camera refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -128,6 +135,9 @@ const VoiceControl = ({
   // Handle messages from Hume EVI
   const handleMessage = useCallback(
     async (message: SubscribeEvent) => {
+      // Debug: log ALL messages
+      console.log('📨 RAW MESSAGE:', message.type, JSON.stringify(message).slice(0, 500));
+
       switch (message.type) {
         case 'chat_metadata':
           console.log('📋 Chat ID:', message.chatId);
@@ -142,6 +152,32 @@ const VoiceControl = ({
           }
           if (content) {
             setTranscript((prev) => [...prev, `You: ${content}`]);
+
+            // Detect "take a picture" voice command and capture from expression camera
+            const lowerContent = content.toLowerCase();
+            if (
+              lowerContent.includes('take a picture') ||
+              lowerContent.includes('take picture') ||
+              lowerContent.includes('show you') ||
+              lowerContent.includes('what do you see') ||
+              lowerContent.includes('look at this')
+            ) {
+              // Capture from the expression camera if it's running
+              if (videoRef.current && canvasRef.current && isCameraOn) {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  canvas.width = video.videoWidth || 640;
+                  canvas.height = video.videoHeight || 480;
+                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                  const base64Data = dataUrl.split(',')[1];
+                  sendImageToServer(base64Data, 'picture');
+                  console.log('📸 Voice-triggered picture captured and sent');
+                }
+              }
+            }
           }
           // Extract emotions from prosody if available
           if (message.models?.prosody?.scores) {
@@ -193,11 +229,86 @@ const VoiceControl = ({
           console.error('Hume error:', message);
           break;
 
+        case 'tool_call': {
+          const toolName = (message as { name?: string }).name;
+          const toolCallId = (message as { toolCallId?: string }).toolCallId;
+          console.log('🔧 Tool call:', toolName, toolCallId);
+
+          if (toolName === 'web_search') {
+            setTranscript((prev) => [...prev, '🔍 Searching the web...']);
+          }
+
+          if (toolName === 'take_picture' && toolCallId) {
+            setTranscript((prev) => [...prev, '📸 Taking a picture...']);
+            
+            if (videoRef.current && canvasRef.current && isCameraOn) {
+              const video = videoRef.current;
+              const canvas = canvasRef.current;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                const base64Data = dataUrl.split(',')[1];
+
+                // Analyze image on server
+                fetch(`${getApiBaseUrl()}/api/vision/analyze`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ image: base64Data, type: 'picture' }),
+                })
+                  .then((res) => res.json())
+                  .then((result) => {
+                    if (result.success && result.data?.context && socketRef.current) {
+                      console.log('✅ Vision analysis complete:', result.data.context.substring(0, 100));
+                      socketRef.current.sendToolResponseMessage({
+                        toolCallId,
+                        content: result.data.context,
+                      });
+                    } else {
+                      console.error('❌ Vision analysis failed:', result);
+                      if (socketRef.current) {
+                        socketRef.current.sendToolErrorMessage({
+                          toolCallId,
+                          error: 'Failed to analyze the image. Please try again.',
+                          content: '',
+                        });
+                      }
+                    }
+                  })
+                  .catch((error) => {
+                    console.error('❌ Error analyzing image:', error);
+                    if (socketRef.current) {
+                      socketRef.current.sendToolErrorMessage({
+                        toolCallId,
+                        error: 'Network error while analyzing the image.',
+                        content: '',
+                      });
+                    }
+                  });
+                triggerFlash();
+                console.log('📸 Picture captured for tool call');
+              }
+            } else {
+              console.warn('⚠️ Camera not enabled for take_picture tool');
+              if (socketRef.current && toolCallId) {
+                socketRef.current.sendToolErrorMessage({
+                  toolCallId,
+                  error: 'Camera is not enabled. Please turn on "Let NoVo See Me" first.',
+                  content: '',
+                });
+              }
+            }
+          }
+          break;
+        }
+
         default:
-          console.log('📥 Hume:', message.type);
+          console.log('📥 Hume:', message.type, message);
       }
     },
-    [onEmotionsDetected]
+    [onEmotionsDetected, isCameraOn, triggerFlash]
   );
 
   // Send image to server for vision analysis (camera or picture)
@@ -270,6 +381,13 @@ const VoiceControl = ({
       // Start sending frames periodically
       frameIntervalRef.current = window.setInterval(captureAndSendFrame, FRAME_INTERVAL_MS);
       console.log('📷 Expression camera started');
+
+      // Notify NoVo that she can now see the user
+      if (socketRef.current) {
+        socketRef.current.sendUserInput(
+          '[The user just turned on their camera. You can now see them. Briefly acknowledge that you can see them now and make a friendly observation about them.]'
+        );
+      }
     } catch (error) {
       console.error('Error starting expression camera:', error);
     }
@@ -381,6 +499,26 @@ const VoiceControl = ({
         setIsConnected(true);
         setStatus('Connected - Speak now!');
 
+        // Send session settings with tool instructions
+        socket.sendSessionSettings({
+          systemPrompt:
+            'You are NoVo, a warm and caring AI companion. IMPORTANT: You must ONLY speak and respond in English. Never use any other language under any circumstances. If you hear something that sounds like another language, assume it is English and respond in English only. Always be warm, friendly, and supportive. You have access to a take_picture tool and web_search tool. When the user asks you to take a picture, look at something, says "what do you see", "look at this", or wants to show you something, you MUST call the take_picture tool. When the user asks for current information, facts, news, or anything requiring real-time data, use the web_search tool to find accurate information. Never say you cannot take pictures or search the web.',
+          tools: [
+            {
+              type: 'function',
+              name: 'take_picture',
+              description:
+                'Captures a photo using the user\'s camera to see what the user is showing. Use this when the user asks you to look at something, take a picture, or says "what do you see", "look at this", "show you something", etc. The camera must be enabled for this to work.',
+              parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+              },
+            },
+          ],
+          builtinTools: [{ name: 'web_search' }],
+        });
+
         // Start audio capture
         await startAudioCapture(socket);
       });
@@ -431,6 +569,9 @@ const VoiceControl = ({
 
   return (
     <div className="voice-control">
+      {/* Camera flash overlay */}
+      {showFlash && <div className="camera-flash" />}
+
       {/* Hidden video and canvas for webcam capture */}
       <video ref={videoRef} className="hidden-video" playsInline muted />
       <canvas ref={canvasRef} className="hidden-canvas" />

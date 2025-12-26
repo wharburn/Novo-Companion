@@ -7,6 +7,7 @@ An emotionally intelligent AI companion for elderly users with vision capabiliti
 - 🗣️ **Proactive Conversations** - NoVo initiates conversations at scheduled times using Hume EVI
 - 👨‍👩‍👧‍👦 **Family Tree Builder** - Learns about family through natural dialogue
 - 📸 **"Show NoVo" Vision** - Real-time camera analysis with GPT-4 Vision or Claude
+- 🔍 **Web Search** - Access to real-time information via built-in web search tool
 - 🧠 **Natural Learning** - Remembers medical info, preferences, routines organically
 - 📱 **Family Album** - Upload and organize family photos with S3 storage
 - ⚙️ **Comprehensive Settings** - Full control over conversation mode, privacy, and features
