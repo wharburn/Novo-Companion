@@ -29,3 +29,5 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Local photo storage
+storage/

@@ -40,7 +40,8 @@
 }
 
 .camera-btn,
-.picture-btn {
+.picture-btn,
+.album-btn {
   flex: 1;
   padding: 16px 12px;
   font-size: 14px;
@@ -59,13 +60,15 @@
 }
 
 .camera-btn:disabled,
-.picture-btn:disabled {
+.picture-btn:disabled,
+.album-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .camera-btn:not(:disabled):hover,
-.picture-btn:not(:disabled):hover {
+.picture-btn:not(:disabled):hover,
+.album-btn:not(:disabled):hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
 }

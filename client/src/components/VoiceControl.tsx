@@ -242,7 +242,7 @@ const VoiceControl = ({
 
           if (toolName === 'take_picture' && toolCallId) {
             setTranscript((prev) => [...prev, '📸 Taking a picture...']);
-            
+
             if (videoRef.current && canvasRef.current && isCameraOn) {
               const video = videoRef.current;
               const canvas = canvasRef.current;
@@ -263,7 +263,10 @@ const VoiceControl = ({
                   .then((res) => res.json())
                   .then((result) => {
                     if (result.success && result.data?.context && socketRef.current) {
-                      console.log('✅ Vision analysis complete:', result.data.context.substring(0, 100));
+                      console.log(
+                        '✅ Vision analysis complete:',
+                        result.data.context.substring(0, 100)
+                      );
                       socketRef.current.sendToolResponseMessage({
                         toolCallId,
                         content: result.data.context,
@@ -385,7 +388,7 @@ const VoiceControl = ({
       captureAndSendFrame();
 
       console.log('📷 Expression camera started - initial frame sent');
-      
+
       // Note: We only send the initial frame, not continuous frames
       // Continuous vision analysis would be too expensive and disruptive
     } catch (error) {
@@ -443,18 +446,26 @@ const VoiceControl = ({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: base64Data, type: 'picture' }),
           });
-          
+
           if (!response.ok) {
             throw new Error(`Vision API error: ${response.status}`);
           }
-          
+
           const result = await response.json();
           console.log('Vision analysis result:', result);
 
           if (result.success && result.description) {
             // Save photo with description
             console.log('💾 Saving photo to album...');
-            const saveResponse = await fetch(`${getApiBaseUrl()}/api/photos/${userId}/save-photo`, {
+            const saveUrl = `${getApiBaseUrl()}/api/photos/${userId}/save-photo`;
+            console.log('📍 Save URL:', saveUrl);
+            console.log('📦 Payload:', {
+              hasImage: !!dataUrl,
+              imageLength: dataUrl?.length,
+              description: result.description?.substring(0, 50),
+            });
+
+            const saveResponse = await fetch(saveUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -463,11 +474,11 @@ const VoiceControl = ({
                 subject: 'general',
               }),
             });
-            
+
             if (!saveResponse.ok) {
               throw new Error(`Photo save error: ${saveResponse.status}`);
             }
-            
+
             const saveResult = await saveResponse.json();
             console.log('Photo save result:', saveResult);
 
@@ -484,7 +495,9 @@ const VoiceControl = ({
           }
         } catch (error) {
           console.error('Error processing picture:', error);
-          alert('Error saving photo: ' + (error instanceof Error ? error.message : 'Unknown error'));
+          alert(
+            'Error saving photo: ' + (error instanceof Error ? error.message : 'Unknown error')
+          );
         }
       }
     }
@@ -647,11 +660,7 @@ const VoiceControl = ({
           <span className="btn-icon">📷</span>
         </button>
 
-        <button
-          type="button"
-          className="album-btn"
-          onClick={onViewPhotos}
-        >
+        <button type="button" className="album-btn" onClick={onViewPhotos}>
           View Photo Album
           <span className="btn-icon">🖼️</span>
         </button>
