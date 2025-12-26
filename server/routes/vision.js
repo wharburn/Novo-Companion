@@ -25,8 +25,8 @@ router.post('/analyze', async (req, res) => {
         'Describe what you see in detail: the person (their clothing, appearance, expression), the room (lighting, colors, objects visible), and the overall atmosphere. Be warm, personal, and detailed - as if greeting someone you care about. Include 3-4 specific observations.'
       );
       if (result.success && result.description) {
-        // Send as invisible assistant context, not as user message
-        contextForEVI = `You can now see the user through the camera. Here's what you observe: ${result.description}. Acknowledge that you can see them warmly and personally, mentioning specific details like what they're wearing and their surroundings.`;
+        // Send as invisible assistant context - just the observations, NoVo will respond naturally
+        contextForEVI = `[VISUAL INPUT] ${result.description}`;
       }
     } else if (type === 'picture') {
       // User took a picture - describe it in detail
