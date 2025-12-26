@@ -48,6 +48,14 @@ router.post('/:userId/:memberName', upload.single('photo'), async (req, res) => 
 // Save photo from camera (base64)
 router.post('/:userId/save-photo', async (req, res) => {
   try {
+    // Check if storage is configured
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.S3_BUCKET_NAME) {
+      return res.status(503).json({
+        success: false,
+        error: 'Photo storage not configured. Please set up Cloudflare R2 or AWS S3 credentials in your .env file.',
+      });
+    }
+
     const { userId } = req.params;
     const { image, description, subject } = req.body;
 
