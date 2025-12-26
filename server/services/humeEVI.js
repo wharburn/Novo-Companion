@@ -52,9 +52,19 @@ export function setupHumeWebSocket(wss) {
           sample_rate: 16000,
           channels: 1,
         },
+        language_model_api_key: null,
       };
       humeWs.send(JSON.stringify(sessionSettings));
       console.log('📤 Sent session settings:', sessionSettings);
+
+      // Send language instruction as context
+      humeWs.send(
+        JSON.stringify({
+          type: 'assistant_input',
+          text: '(IMPORTANT: Always respond in English only. Never switch to other languages unless the user explicitly asks.)',
+        })
+      );
+      console.log('📤 Sent language instruction');
 
       clientWs.send(
         JSON.stringify({

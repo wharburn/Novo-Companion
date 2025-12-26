@@ -274,13 +274,17 @@ const VoiceControl = ({
       if (!isProduction) return; // Python server handles audio in dev
 
       try {
-        // Decode base64 to ArrayBuffer
+        // Decode base64 to ArrayBuffer - create a proper copy
         const binaryString = atob(base64Audio);
-        const bytes = new Uint8Array(binaryString.length);
+        const buffer = new ArrayBuffer(binaryString.length);
+        const view = new Uint8Array(buffer);
         for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+          view[i] = binaryString.charCodeAt(i);
         }
-        audioBuffersRef.current.push(bytes.buffer);
+        audioBuffersRef.current.push(buffer);
+        console.log(
+          `🔊 Buffered chunk #${audioBuffersRef.current.length}, ${buffer.byteLength} bytes`
+        );
       } catch (err) {
         console.error('Error processing audio:', err);
       }
