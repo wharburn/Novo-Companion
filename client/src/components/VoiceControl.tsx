@@ -1,5 +1,19 @@
+import {
+  convertBlobToBase64,
+  ensureSingleValidAudioTrack,
+  EVIWebAudioPlayer,
+  getAudioStream,
+  getBrowserSupportedMimeType,
+  Hume,
+  HumeClient,
+  MimeType,
+} from 'hume';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './VoiceControl.css';
+
+// Type aliases for Hume SDK types
+type SubscribeEvent = Hume.empathicVoice.SubscribeEvent;
+type ChatSocket = Awaited<ReturnType<HumeClient['empathicVoice']['chat']['connect']>>;
 
 interface VoiceControlProps {
   userId: string;
@@ -13,20 +27,15 @@ interface VoiceControlProps {
   onDisconnectRef?: React.MutableRefObject<(() => void) | null>;
 }
 
-// WebSocket URL - Python server for local dev, Node.js server for production
-const getWebSocketUrl = () => {
-  // Check if we're in development mode
-  const isDev = import.meta.env?.DEV ?? window.location.hostname === 'localhost';
-  if (isDev) {
-    // Local development: use Python server
-    return 'ws://localhost:8765';
-  }
-  // Production: use Node.js WebSocket at /ws/hume
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws/hume`;
-};
-const WS_URL = getWebSocketUrl();
 const FRAME_INTERVAL_MS = 1000; // Send a frame every 1 second
+
+// Get API base URL for server calls (vision, etc.)
+const getApiBaseUrl = () => {
+  if (import.meta.env?.DEV) {
+    return 'http://localhost:3001';
+  }
+  return '';
+};
 
 const VoiceControl = ({
   userId: _userId,
@@ -44,20 +53,18 @@ const VoiceControl = ({
   const [_status, setStatus] = useState('Tap avatar to connect');
   const [topEmotions, setTopEmotions] = useState<Array<{ name: string; score: number }>>([]);
 
-  const wsRef = useRef<WebSocket | null>(null);
+  // Camera refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pictureVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const pictureStreamRef = useRef<MediaStream | null>(null);
   const frameIntervalRef = useRef<number | null>(null);
 
-  // Audio refs for production mode
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<Blob[]>([]);
-  const isPlayingRef = useRef<boolean>(false);
+  // Hume SDK refs
+  const socketRef = useRef<ChatSocket | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const playerRef = useRef<EVIWebAudioPlayer | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -83,272 +90,171 @@ const VoiceControl = ({
     }
   });
 
-  // Check if we're in production (not using Python server)
-  const isProduction = !WS_URL.includes('localhost:8765');
+  // Start audio capture using Hume SDK utilities
+  const startAudioCapture = useCallback(async (socket: ChatSocket) => {
+    const mimeTypeResult = getBrowserSupportedMimeType();
+    const mimeType = mimeTypeResult.success ? mimeTypeResult.mimeType : MimeType.WEBM;
 
-  // Resample audio from source rate to target rate
-  const resampleAudio = useCallback(
-    (inputData: Float32Array, sourceRate: number, targetRate: number): Float32Array => {
-      if (sourceRate === targetRate) return inputData;
-      const ratio = sourceRate / targetRate;
-      const outputLength = Math.floor(inputData.length / ratio);
-      const output = new Float32Array(outputLength);
-      for (let i = 0; i < outputLength; i++) {
-        output[i] = inputData[Math.floor(i * ratio)];
+    const micAudioStream = await getAudioStream();
+    ensureSingleValidAudioTrack(micAudioStream);
+
+    const recorder = new MediaRecorder(micAudioStream, { mimeType });
+    recorder.ondataavailable = async (e: BlobEvent) => {
+      if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+        const data = await convertBlobToBase64(e.data);
+        socket.sendAudioInput({ data });
       }
-      return output;
+    };
+    recorder.onerror = (e) => console.error('MediaRecorder error:', e);
+    recorder.start(100); // Send audio every 100ms
+
+    recorderRef.current = recorder;
+    setIsListening(true);
+    console.log('🎤 Audio capture started (Hume SDK)');
+
+    return recorder;
+  }, []);
+
+  // Stop audio capture
+  const stopAudioCapture = useCallback(() => {
+    if (recorderRef.current) {
+      recorderRef.current.stream.getTracks().forEach((t) => t.stop());
+      recorderRef.current.stop();
+      recorderRef.current = null;
+    }
+    setIsListening(false);
+  }, []);
+
+  // Handle messages from Hume EVI
+  const handleMessage = useCallback(
+    async (message: SubscribeEvent) => {
+      switch (message.type) {
+        case 'chat_metadata':
+          console.log('📋 Chat ID:', message.chatId);
+          break;
+
+        case 'user_message': {
+          let content = message.message?.content || '';
+          // Strip [SYSTEM CONTEXT: ...] prefix if present
+          const contextMatch = content.match(/^\[SYSTEM CONTEXT:.*?\]\s*/);
+          if (contextMatch) {
+            content = content.substring(contextMatch[0].length);
+          }
+          if (content) {
+            setTranscript((prev) => [...prev, `You: ${content}`]);
+          }
+          // Extract emotions from prosody if available
+          if (message.models?.prosody?.scores) {
+            const scores = message.models.prosody.scores as unknown as Record<string, number>;
+            const sorted = Object.entries(scores)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 3)
+              .map(([name, score]) => ({ name, score }));
+            setTopEmotions(sorted);
+            if (onEmotionsDetected) {
+              onEmotionsDetected(sorted);
+            }
+          }
+          break;
+        }
+
+        case 'assistant_message': {
+          const content = message.message?.content || '';
+          if (content) {
+            setTranscript((prev) => [...prev, `NoVo: ${content}`]);
+          }
+          setIsSpeaking(true);
+          setIsListening(false);
+          break;
+        }
+
+        case 'audio_output':
+          // Use Hume's EVIWebAudioPlayer for smooth playback
+          if (playerRef.current) {
+            await playerRef.current.enqueue(message);
+          }
+          break;
+
+        case 'user_interruption':
+          // User interrupted - stop playback
+          if (playerRef.current) {
+            playerRef.current.stop();
+          }
+          setIsSpeaking(false);
+          setIsListening(true);
+          break;
+
+        case 'assistant_end':
+          setIsSpeaking(false);
+          setIsListening(true);
+          break;
+
+        case 'error':
+          console.error('Hume error:', message);
+          break;
+
+        default:
+          console.log('📥 Hume:', message.type);
+      }
+    },
+    [onEmotionsDetected]
+  );
+
+  // Send image to server for vision analysis (camera or picture)
+  const sendImageToServer = useCallback(
+    async (imageData: string, type: 'camera_frame' | 'picture') => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/api/vision/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: imageData, type }),
+        });
+        const result = await response.json();
+        if (result.success && result.data?.context && socketRef.current) {
+          // Inject vision context into EVI conversation
+          socketRef.current.sendUserInput(result.data.context);
+        }
+      } catch (error) {
+        console.error('Error sending image to server:', error);
+      }
     },
     []
   );
 
-  // Start microphone capture for production mode
-  // Hume EVI expects: linear16 PCM, 16kHz, mono
-  const startMicrophoneCapture = useCallback(async () => {
-    if (!isProduction) return; // Python server handles audio in dev
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      micStreamRef.current = stream;
-
-      // Use device's native sample rate (browser may not support 16kHz)
-      audioContextRef.current = new AudioContext();
-      const actualSampleRate = audioContextRef.current.sampleRate;
-      console.log(`🎤 Audio context sample rate: ${actualSampleRate}Hz`);
-
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      processor.onaudioprocess = (e) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
-        const rawData = e.inputBuffer.getChannelData(0);
-
-        // Resample to 16kHz if needed (Hume expects 16kHz)
-        const inputData: Float32Array =
-          actualSampleRate !== 16000
-            ? resampleAudio(rawData, actualSampleRate, 16000)
-            : new Float32Array(rawData);
-
-        // Convert Float32 to Int16 (little-endian)
-        const int16Data = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
-          int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-        }
-
-        // Convert to base64
-        const bytes = new Uint8Array(int16Data.buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64 = btoa(binary);
-
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'audio_input',
-            data: base64,
-          })
-        );
-      };
-
-      source.connect(processor);
-      processor.connect(audioContextRef.current.destination);
-      setIsListening(true);
-      console.log('🎤 Microphone capture started');
-    } catch (err) {
-      console.error('Failed to start microphone:', err);
-    }
-  }, [isProduction, resampleAudio]);
-
-  // Stop microphone capture
-  const stopMicrophoneCapture = useCallback(() => {
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-    }
-    setIsListening(false);
-  }, []);
-
-  // Web Audio API for gapless playback
-  const playbackContextRef = useRef<AudioContext | null>(null);
-  const audioBuffersRef = useRef<ArrayBuffer[]>([]);
-
-  // Play all buffered audio using Web Audio API for gapless playback
-  const playBufferedAudio = useCallback(async () => {
-    if (audioBuffersRef.current.length === 0) {
-      setIsListening(true);
-      return;
-    }
-
-    console.log(`🔊 Decoding ${audioBuffersRef.current.length} audio chunks...`);
-
-    // Create audio context for playback
-    const ctx = new AudioContext();
-    playbackContextRef.current = ctx;
-
-    isPlayingRef.current = true;
-    setIsSpeaking(true);
-    setIsListening(false);
-
-    try {
-      // Decode all chunks to AudioBuffers
-      const buffers = audioBuffersRef.current;
-      audioBuffersRef.current = [];
-
-      const decodedBuffers: AudioBuffer[] = [];
-      for (const buf of buffers) {
-        try {
-          const decoded = await ctx.decodeAudioData(buf.slice(0)); // slice to clone
-          decodedBuffers.push(decoded);
-        } catch (e) {
-          console.warn('🔊 Failed to decode chunk, skipping');
-        }
-      }
-
-      if (decodedBuffers.length === 0) {
-        console.log('🔊 No audio decoded');
-        ctx.close();
-        isPlayingRef.current = false;
-        setIsSpeaking(false);
-        setIsListening(true);
-        return;
-      }
-
-      // Calculate total duration
-      let totalDuration = 0;
-      for (const buf of decodedBuffers) {
-        totalDuration += buf.duration;
-      }
-      console.log(
-        `🔊 Playing ${decodedBuffers.length} chunks, total duration: ${totalDuration.toFixed(2)}s`
-      );
-
-      // Schedule all buffers to play back-to-back
-      let startTime = ctx.currentTime;
-      for (const buffer of decodedBuffers) {
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        source.start(startTime);
-        startTime += buffer.duration;
-      }
-
-      // Set timeout for when playback ends
-      setTimeout(() => {
-        console.log('🔊 Playback complete');
-        ctx.close();
-        playbackContextRef.current = null;
-        isPlayingRef.current = false;
-        setIsSpeaking(false);
-        setIsListening(true);
-      }, totalDuration * 1000 + 100);
-    } catch (err) {
-      console.error('🔊 Playback error:', err);
-      ctx.close();
-      playbackContextRef.current = null;
-      isPlayingRef.current = false;
-      setIsSpeaking(false);
-      setIsListening(true);
-    }
-  }, []);
-
-  // Buffer audio chunks from Hume (production mode)
-  const playAudioChunk = useCallback(
-    async (base64Audio: string) => {
-      if (!isProduction) return; // Python server handles audio in dev
-
-      try {
-        // Decode base64 to ArrayBuffer - create a proper copy
-        const binaryString = atob(base64Audio);
-        const buffer = new ArrayBuffer(binaryString.length);
-        const view = new Uint8Array(buffer);
-        for (let i = 0; i < binaryString.length; i++) {
-          view[i] = binaryString.charCodeAt(i);
-        }
-        audioBuffersRef.current.push(buffer);
-        console.log(
-          `🔊 Buffered chunk #${audioBuffersRef.current.length}, ${buffer.byteLength} bytes`
-        );
-      } catch (err) {
-        console.error('Error processing audio:', err);
-      }
-    },
-    [isProduction]
-  );
-
-  // Called when assistant finishes - decode and play all audio
-  const onAssistantEnd = useCallback(() => {
-    console.log(`🔊 assistant_end, ${audioBuffersRef.current.length} chunks buffered`);
-    if (audioBuffersRef.current.length > 0 && !isPlayingRef.current) {
-      playBufferedAudio();
-    } else if (audioBuffersRef.current.length === 0) {
-      setIsListening(true);
-    }
-  }, [playBufferedAudio]);
-
-  // Capture and send webcam frame
+  // Capture and send webcam frame for expression analysis
   const captureAndSendFrame = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || !wsRef.current) return;
-    if (wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!videoRef.current || !canvasRef.current || !isConnected) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size to match video
     canvas.width = video.videoWidth || 320;
     canvas.height = video.videoHeight || 240;
-
-    // Draw video frame to canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convert to base64 JPEG
     const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
     const base64Data = dataUrl.split(',')[1];
 
-    // Send to Python server for expression analysis
-    wsRef.current.send(
-      JSON.stringify({
-        type: 'face_frame',
-        data: base64Data,
-      })
-    );
-  }, []);
+    sendImageToServer(base64Data, 'camera_frame');
+  }, [isConnected, sendImageToServer]);
 
   // Start webcam for facial expression detection (front camera)
-  const startExpressionCamera = async () => {
+  const startExpressionCamera = useCallback(async () => {
     try {
-      // Stop any existing frame interval
       if (frameIntervalRef.current) {
         clearInterval(frameIntervalRef.current);
         frameIntervalRef.current = null;
       }
-      // Stop existing stream tracks
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 320, height: 240, facingMode: 'user' },
       });
-      streamRef.current = stream;
+      cameraStreamRef.current = stream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -357,23 +263,17 @@ const VoiceControl = ({
 
       setIsCameraOn(true);
 
-      // Notify server that camera was just enabled
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'camera_enabled' }));
-        console.log('📷 Sent camera_enabled to server');
-      }
-
-      // Wait a moment for video to be ready, then capture first frame immediately
+      // Wait for video to be ready, then capture first frame
       await new Promise((resolve) => setTimeout(resolve, 300));
       captureAndSendFrame();
 
-      // Start sending frames periodically for expression analysis
+      // Start sending frames periodically
       frameIntervalRef.current = window.setInterval(captureAndSendFrame, FRAME_INTERVAL_MS);
-      console.log('📷 Expression camera started (front)');
+      console.log('📷 Expression camera started');
     } catch (error) {
       console.error('Error starting expression camera:', error);
     }
-  };
+  }, [captureAndSendFrame]);
 
   // Open picture modal with rear camera viewfinder
   const openPictureModal = async () => {
@@ -384,7 +284,6 @@ const VoiceControl = ({
       pictureStreamRef.current = stream;
       setShowPictureModal(true);
 
-      // Wait for modal to render, then attach stream to video
       setTimeout(() => {
         if (pictureVideoRef.current) {
           pictureVideoRef.current.srcObject = stream;
@@ -396,7 +295,7 @@ const VoiceControl = ({
     }
   };
 
-  // Close picture modal and stop camera
+  // Close picture modal
   const closePictureModal = () => {
     if (pictureStreamRef.current) {
       pictureStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -405,9 +304,9 @@ const VoiceControl = ({
     setShowPictureModal(false);
   };
 
-  // Capture the picture and send to Novo
-  const capturePicture = () => {
-    if (pictureVideoRef.current && canvasRef.current && wsRef.current) {
+  // Capture picture and send to server for analysis
+  const capturePicture = useCallback(() => {
+    if (pictureVideoRef.current && canvasRef.current) {
       const video = pictureVideoRef.current;
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
@@ -418,163 +317,112 @@ const VoiceControl = ({
         const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
         const base64Data = dataUrl.split(',')[1];
 
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'picture',
-            data: base64Data,
-          })
-        );
-        console.log('📸 Picture captured and sent to Novo');
+        sendImageToServer(base64Data, 'picture');
+        console.log('📸 Picture captured and sent');
       }
     }
     closePictureModal();
-  };
+  }, [sendImageToServer]);
 
   // Stop webcam capture
-  const stopWebcam = () => {
+  const stopWebcam = useCallback(() => {
     if (frameIntervalRef.current) {
       clearInterval(frameIntervalRef.current);
       frameIntervalRef.current = null;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     setIsCameraOn(false);
-  };
+  }, []);
 
-  const connect = async () => {
+  // Connect to Hume EVI using TypeScript SDK
+  const connect = useCallback(async () => {
     try {
-      setStatus('Connecting to NoVo...');
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
+      setStatus('Getting access token...');
 
-      ws.onopen = () => {
-        console.log('✅ Connected to NoVo server');
-        setStatus('Waiting for Hume...');
-      };
+      // Fetch access token from our server
+      const tokenResponse = await fetch(`${getApiBaseUrl()}/api/hume/access-token`);
+      const tokenData = await tokenResponse.json();
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          // Don't log noisy messages
-          if (!['emotions_detected', 'audio_output'].includes(data.type)) {
-            console.log('📥 Server:', data.type);
-          }
+      if (!tokenData.success || !tokenData.data?.accessToken) {
+        throw new Error('Failed to get access token');
+      }
 
-          switch (data.type) {
-            // Python server events (dev mode)
-            case 'connected':
-              setIsConnected(true);
-              setIsListening(true);
-              setStatus('Connected - Speak now!');
-              break;
-            case 'speaking_start':
-              setIsSpeaking(true);
-              setIsListening(false);
-              setStatus('NoVo is speaking...');
-              break;
-            case 'speaking_end':
-              setIsSpeaking(false);
-              setIsListening(true);
-              setStatus('Listening...');
-              break;
-            // Node.js server events (production mode)
-            case 'connection_status':
-              if (data.status === 'connected') {
-                setIsConnected(true);
-                setStatus('Connected - Speak now!');
-                startMicrophoneCapture();
-              } else {
-                setIsConnected(false);
-                setStatus('Disconnected');
-                stopMicrophoneCapture();
-              }
-              break;
-            case 'audio_output':
-              // Play audio from Hume (production mode)
-              if (data.data) {
-                playAudioChunk(data.data);
-              }
-              break;
-            case 'user_message': {
-              // Strip out [SYSTEM CONTEXT: ...] prefix if present
-              let content = data.message?.content || data.content || '';
-              const contextMatch = content.match(/^\[SYSTEM CONTEXT:.*?\]\s*/);
-              if (contextMatch) {
-                content = content.substring(contextMatch[0].length);
-              }
-              if (content) {
-                setTranscript((prev) => [...prev, `You: ${content}`]);
-              }
-              break;
-            }
-            case 'assistant_message':
-              // Hume sends content in data.message.content
-              const assistantContent = data.message?.content || data.content || '';
-              if (assistantContent) {
-                setTranscript((prev) => [...prev, `NoVo: ${assistantContent}`]);
-              }
-              break;
-            case 'emotions_detected':
-              // Update top emotions display
-              if (data.emotions && data.emotions.length > 0) {
-                setTopEmotions(data.emotions.slice(0, 3));
-                if (onEmotionsDetected) {
-                  onEmotionsDetected(data.emotions);
-                }
-              }
-              break;
-            case 'assistant_end':
-              // Play buffered audio when assistant finishes
-              onAssistantEnd();
-              break;
-            case 'error':
-              console.error('Error:', data.message);
-              break;
-          }
-        } catch (error) {
-          console.error('Error parsing message:', error);
-        }
-      };
+      const { accessToken, configId } = tokenData.data;
+      setStatus('Connecting to Hume...');
 
-      ws.onerror = () => {
+      // Create Hume client with access token
+      const client = new HumeClient({ accessToken });
+
+      // Initialize audio player
+      const player = new EVIWebAudioPlayer();
+      await player.init();
+      playerRef.current = player;
+
+      // Connect to EVI
+      const socket = await client.empathicVoice.chat.connect({
+        configId,
+      });
+      socketRef.current = socket;
+
+      // Set up event handlers
+      socket.on('open', async () => {
+        console.log('✅ Connected to Hume EVI');
+        setIsConnected(true);
+        setStatus('Connected - Speak now!');
+
+        // Start audio capture
+        await startAudioCapture(socket);
+      });
+
+      socket.on('message', handleMessage);
+
+      socket.on('error', (err: Error) => {
+        console.error('Hume error:', err);
         setStatus('Connection error');
-        setIsConnected(false);
-        stopWebcam();
-        stopMicrophoneCapture();
-      };
+      });
 
-      ws.onclose = () => {
-        setStatus('Disconnected');
+      socket.on('close', () => {
+        console.log('🔌 Disconnected from Hume');
         setIsConnected(false);
         setIsListening(false);
         setIsSpeaking(false);
+        setStatus('Disconnected');
+        stopAudioCapture();
         stopWebcam();
-        stopMicrophoneCapture();
-      };
+      });
     } catch (error) {
       console.error('Error connecting:', error);
       setStatus('Failed to connect');
     }
-  };
+  }, [handleMessage, startAudioCapture, stopAudioCapture, stopWebcam]);
 
-  const disconnect = () => {
+  // Disconnect from Hume EVI
+  const disconnect = useCallback(() => {
     stopWebcam();
-    stopMicrophoneCapture();
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    stopAudioCapture();
+
+    if (playerRef.current) {
+      playerRef.current.dispose();
+      playerRef.current = null;
     }
+
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
+    }
+
     setIsConnected(false);
     setIsListening(false);
     setIsSpeaking(false);
     setTopEmotions([]);
     setStatus('Disconnected');
-  };
+  }, [stopAudioCapture, stopWebcam]);
 
   return (
     <div className="voice-control">

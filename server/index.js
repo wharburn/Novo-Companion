@@ -12,6 +12,7 @@ import { WebSocketServer } from 'ws';
 // Import routes
 import familyRouter from './routes/family.js';
 import healthRouter from './routes/health.js';
+import humeRouter from './routes/hume.js';
 import photoRouter from './routes/photo.js';
 import userRouter from './routes/user.js';
 import visionRouter from './routes/vision.js';
@@ -48,6 +49,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API Routes
 app.use('/api/health', healthRouter);
+app.use('/api/hume', humeRouter);
 app.use('/api/user', userRouter);
 app.use('/api/family', familyRouter);
 app.use('/api/photos', photoRouter);
