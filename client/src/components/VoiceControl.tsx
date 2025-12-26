@@ -509,11 +509,11 @@ const VoiceControl = ({
               name: 'take_picture',
               description:
                 'Captures a photo using the user\'s camera to see what the user is showing. Use this when the user asks you to look at something, take a picture, or says "what do you see", "look at this", "show you something", etc. The camera must be enabled for this to work.',
-              parameters: {
+              parameters: JSON.stringify({
                 type: 'object',
                 properties: {},
                 required: [],
-              },
+              }),
             },
           ],
           builtinTools: [{ name: 'web_search' }],
